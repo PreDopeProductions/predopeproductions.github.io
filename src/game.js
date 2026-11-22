@@ -1,11 +1,14 @@
 "use strict";
-/* SKYMYST — THIN AIR. A one-prompt platformer built on Zack Bell's platformer
-   devlog architecture (Pts 1-6), translated from GameMaker to Canvas:
-   oGame controller, oParSolid / oParEntity parents, Approach(), OnGround(),
-   his exact tuning numbers, variable jumps, wall cling/slide/jump, jump-through
-   platforms, moving platforms (here: airships) with sub-pixel movement,
-   composite objects (spikes parented to a ship), gamepad + keyboard merged
-   input, music/room fades. Art: Derek's supplied sprites, extracted. */
+/* SKYMYST — THIN AIR v2. A faithful port of Zack Bell's platformer devlog
+   (Pts 1-6), translated from GameMaker to Canvas — this time line by line:
+   oParEntity moves in whole-pixel steps with sub-pixel accumulators (Pt 4),
+   OnGround() is his exact script (Pt 2/3), the player step event is his
+   Pt 2 code in his order (cling alarm, wall slide, wall-jump branches,
+   variable jump), and moving platforms are constant-speed ships that reverse
+   off bumpers and carry/push entities pixel by pixel in their end step
+   (Pt 3/4, incl. PlaceMeetingException and composite parent offsets).
+   oGame controller, gamepad + keyboard merged input, music/room fades (Pt 5).
+   Art: Derek's supplied sprites, extracted. */
 const W = 640, H = 360, TILE = 16;
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
@@ -211,114 +214,212 @@ function slopeSurfaceY(tx, ty, dir, cx) {
   return top + (cx - lx);                            // "\" falls to the right
 }
 
-/* oParEntity (Pt 2/3/4): vx, vy, onGround, sub-pixel-safe AABB vs tiles,
-   jump-through platforms, slopes, moving-platform landing. */
+/* oParEntity (Pt 2/3/4), ported the way Zack Bell builds it:
+   - place_meeting() equivalents: solidAt() for tiles, deck tests for ships.
+   - Slopes are FLOOR, not walls (his collision article): they never block
+     horizontal steps; the end step lands on their surface and snaps down
+     to it while grounded, so a 45-degree ramp climbs 1px per 1px.
+   - Movement is whole pixels only. Fractions collect in cx/cy (Pt 4:
+     "collect the rounded sub-pixel numbers and add them when they exceed
+     a whole number") and are spent 1px at a time, checking at every pixel.
+   - onGround / cLeft / cRight are recomputed at the start of the step
+     (oParEntity 'begin step'), never carried stale from a create event. */
 function makeEntity(x, y) {
-  return { x, y, w: 12, h: 44, vx: 0, vy: 0, onGround: false, cLeft: false, cRight: false,
-           standingOn: null, face: 1, animT: 0, dead: false };
+  return { x, y, w: 12, h: 44, vx: 0, vy: 0, cx: 0, cy: 0, onGround: false,
+           cLeft: false, cRight: false, standingOn: null, face: 1, animT: 0,
+           dead: false, alarm: 0, canStick: true, sticking: false };
 }
-function entityTiles(e) {
-  return { l: Math.floor(e.x / TILE), r: Math.floor((e.x + e.w - 1) / TILE),
-           t: Math.floor(e.y / TILE), b: Math.floor((e.y + e.h - 1) / TILE) };
+function solidAt(x, y, w, h) {
+  const tx0 = Math.floor(x / TILE), tx1 = Math.floor((x + w - 0.01) / TILE);
+  const ty0 = Math.floor(y / TILE), ty1 = Math.floor((y + h - 0.01) / TILE);
+  for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++)
+    if (tileSolid(tx, ty)) return true;
+  return false;
 }
-function physMove(e) {
-  e.cLeft = e.cRight = false;
-  const wasGround = e.onGround;
-  // --- X axis ---
-  e.x += e.vx;
-  let t = entityTiles(e);
-  if (e.vx > 0) {
-    for (let ty = t.t; ty <= t.b; ty++) if (tileSolid(t.r, ty)) { e.x = t.r * TILE - e.w - 0.01; e.cRight = true; e.vx = 0; break; }
-  } else if (e.vx < 0) {
-    for (let ty = t.t; ty <= t.b; ty++) if (tileSolid(t.l, ty)) { e.x = (t.l + 1) * TILE + 0.01; e.cLeft = true; e.vx = 0; break; }
+function deckAt(x, y, w, h, ignore) {
+  for (const m of movers) {
+    if (m === ignore) continue;
+    const d = m.deck();
+    if (x + w > d.x && x < d.x + d.w && y + h > d.y && y < d.y + d.h) return m;
   }
-  // --- Y axis ---
-  const prevBottom = e.y + e.h;
-  e.y += e.vy;
-  e.onGround = false; e.standingOn = null;
-  t = entityTiles(e);
-  if (e.vy > 0) {
-    outer: for (let ty = t.t; ty <= t.b; ty++) for (let tx = t.l; tx <= t.r; tx++)
-      if (tileSolid(tx, ty)) { e.y = ty * TILE - e.h; e.vy = 0; e.onGround = true; break outer; }
-  } else if (e.vy < 0) {
-    outer2: for (let ty = t.b; ty >= t.t; ty--) for (let tx = t.l; tx <= t.r; tx++)
-      if (tileSolid(tx, ty)) { e.y = (ty + 1) * TILE + 0.01; e.vy = 0; break outer2; }
-  }
-  // jump-through platforms (Pt 3): land only when falling onto the top
-  if (e.vy >= 0) {
-    for (const p of level.through) {
-      const px = p[0] * TILE, pw = p[2] * TILE, ptop = p[1] * TILE;
-      if (e.x + e.w > px && e.x < px + pw && prevBottom <= ptop + 1 && e.y + e.h >= ptop) {
-        e.y = ptop - e.h; e.vy = 0; e.onGround = true;
-      }
-    }
-    // moving platforms (airships): land on decks
-    for (const m of movers) {
-      const d = m.deck();
-      if (e.x + e.w > d.x && e.x < d.x + d.w && prevBottom <= d.y + 2 && e.y + e.h >= d.y) {
-        e.y = d.y - e.h; e.vy = 0; e.onGround = true; e.standingOn = m;
-      }
-    }
-  }
-  // standing probe: exactly touching a solid tile counts as grounded
-  if (e.vy >= 0 && !e.onGround && (e.y + e.h) % TILE === 0) {
-    const row = Math.floor((e.y + e.h) / TILE);
-    for (let tx = t.l; tx <= t.r; tx++) if (tileSolid(tx, row)) { e.onGround = true; break; }
-  }
-  // slopes: snap feet to the surface when close and not rising
-  if (e.vy >= 0) {
-    const cx = e.x + e.w / 2, feetTy = Math.floor((e.y + e.h) / TILE);
-    for (let ty = feetTy - 1; ty <= feetTy; ty++) {
-      const dir = slopeAt(Math.floor(cx / TILE), ty);
-      if (dir) {
-        const surf = slopeSurfaceY(Math.floor(cx / TILE), ty, dir, cx);
-        const diff = (e.y + e.h) - surf;
-        if (diff >= -2 && diff <= 14) { e.y = surf - e.h; e.vy = 0; e.onGround = true; }
-      }
-    }
-  }
-  if (wasGround && !e.onGround && e.vy === 0) { /* walked off a ledge: gravity takes over next frame */ }
+  return null;
 }
-function OnGround(e) { // Pt 2: one pixel below — solid, jump-through, deck, or slope
-  const probe = { x: e.x, y: e.y + 1, w: e.w, h: e.h };
-  const t = entityTiles(probe);
-  for (let tx = t.l; tx <= t.r; tx++) if (tileSolid(tx, t.b)) return true;
+function slopeSurfaceBelow(e) {
+  // surface height under the entity's centre, if a slope tile is right there
+  const cx = e.x + e.w / 2, tx = Math.floor(cx / TILE);
+  for (let ty = Math.floor((e.y + e.h) / TILE) - 1; ty <= Math.floor((e.y + e.h) / TILE) + 1; ty++) {
+    const dir = slopeAt(tx, ty);
+    if (dir) return slopeSurfaceY(tx, ty, dir, cx);
+  }
+  return null;
+}
+function OnGround(e) {
+  // Pt 2/3, verbatim in spirit: solid 1px below, OR jump-through 1px below
+  // that we are not already overlapping.
+  if (solidAt(e.x, e.y + 1, e.w, e.h)) return true;
+  const surf = slopeSurfaceBelow(e);
+  if (surf !== null && Math.abs((e.y + e.h) - surf) <= 1.5) return true;
   for (const p of level.through) {
     const px = p[0] * TILE, pw = p[2] * TILE, ptop = p[1] * TILE;
-    if (e.x + e.w > px && e.x < px + pw && Math.abs(e.y + e.h + 1 - ptop) <= 2) return true;
+    if (e.x + e.w > px && e.x < px + pw && Math.abs((e.y + e.h + 1) - ptop) <= 1.5) return true;
   }
-  return e.onGround;
+  for (const m of movers) {
+    const d = m.deck();
+    if (e.x + e.w > d.x && e.x < d.x + d.w && Math.abs((e.y + e.h + 1) - d.y) <= 1.5) return true;
+  }
+  return false;
+}
+function tryMoveEntity(e, dx, dy, ignoreMover) {
+  // Pt 3/4 PlaceMeetingException: move 1px if the destination is free of
+  // solids and other decks — the calling platform itself is ignored,
+  // otherwise a platform could never push anything.
+  if (solidAt(e.x + dx, e.y + dy, e.w, e.h)) return false;
+  if (deckAt(e.x + dx, e.y + dy, e.w, e.h, ignoreMover || e.standingOn)) return false;
+  e.x += dx; e.y += dy;
+  return true;
+}
+function deckBelow(e) {
+  for (const m of movers) {
+    const d = m.deck();
+    if (e.x + e.w > d.x && e.x < d.x + d.w && Math.abs((e.y + e.h) - d.y) <= 1.5) return m;
+  }
+  return null;
+}
+function physMove(e) {
+  // ---- X, 1px at a time (Pt 4 sub-pixel accumulator) ----
+  e.cx += e.vx;
+  let wholeX = Math.trunc(e.cx); e.cx -= wholeX;
+  const dirX = Math.sign(wholeX);
+  e.cLeft = e.cRight = false;
+  while (wholeX !== 0) {
+    const nx = e.x + dirX;
+    const hitSolid = solidAt(nx, e.y, e.w, e.h);
+    // a deck blocks from the side only when the entity is below its top
+    const hitDeck = (() => {
+      const m = deckAt(nx, e.y, e.w, e.h, e.standingOn);
+      return m && (e.y + e.h) > m.deck().y + 2;
+    })();
+    if (hitSolid || hitDeck) {
+      if (dirX > 0) e.cRight = true; else e.cLeft = true;
+      e.vx = 0; e.cx = 0; break;
+    }
+    e.x = nx; wholeX -= dirX;
+  }
+  // Slope step-up: after moving horizontally into a ramp, lift the feet to
+  // its surface (his end-step slope handling). Without this, walking into
+  // a 45-degree ramp just sinks into it.
+  const surfX = slopeSurfaceBelow(e);
+  if (surfX !== null) {
+    const feet = e.y + e.h;
+    if (feet > surfX && feet - surfX <= TILE) e.y = surfX - e.h;
+  }
+  // ---- Y, 1px at a time ----
+  e.cy += e.vy;
+  let wholeY = Math.trunc(e.cy); e.cy -= wholeY;
+  const dirY = Math.sign(wholeY);
+  e.standingOn = null;
+  while (wholeY !== 0) {
+    const prevBottom = e.y + e.h, prevTop = e.y;
+    const ny = e.y + dirY;
+    if (dirY > 0) {
+      // solid floor: land on the top of the blocking row
+      if (solidAt(e.x, ny, e.w, e.h)) {
+        const tyB = Math.floor((ny + e.h - 0.01) / TILE);
+        e.y = tyB * TILE - e.h; e.vy = 0; e.cy = 0; e.onGround = true; break;
+      }
+      // slope floor: land on the surface at the centre
+      const surf = slopeSurfaceBelow({ x: e.x, y: ny, w: e.w, h: e.h });
+      if (surf !== null && prevBottom <= surf + 0.5 && ny + e.h >= surf) {
+        e.y = surf - e.h; e.vy = 0; e.cy = 0; e.onGround = true; break;
+      }
+      // jump-through dock: land only when falling onto the top (Pt 3)
+      let landed = false;
+      for (const p of level.through) {
+        const px = p[0] * TILE, pw = p[2] * TILE, ptop = p[1] * TILE;
+        if (e.x + e.w > px && e.x < px + pw && prevBottom <= ptop + 0.5 && ny + e.h >= ptop) {
+          e.y = ptop - e.h; e.vy = 0; e.cy = 0; e.onGround = true; landed = true; break;
+        }
+      }
+      if (landed) break;
+      // ship deck: land only when falling onto the top
+      const dm = deckAt(e.x, ny, e.w, e.h, null);
+      if (dm && prevBottom <= dm.deck().y + 0.5) {
+        e.y = dm.deck().y - e.h; e.vy = 0; e.cy = 0; e.onGround = true; e.standingOn = dm; break;
+      }
+      e.y = ny; wholeY -= dirY; e.onGround = false;
+    } else {
+      // ceiling: solid above, or a deck hit from below
+      if (solidAt(e.x, ny, e.w, e.h)) { e.vy = 0; e.cy = 0; break; }
+      const dm = deckAt(e.x, ny, e.w, e.h, null);
+      if (dm && prevTop >= dm.deck().y + dm.deck().h - 1) { e.vy = 0; e.cy = 0; break; }
+      e.y = ny; wholeY -= dirY;
+    }
+  }
+  // grounded on a slope: snap feet back down to the surface after X steps,
+  // so running down a ramp never floats (his end-step slope handling).
+  if (e.onGround) {
+    const surf = slopeSurfaceBelow(e);
+    if (surf !== null && (e.y + e.h) < surf && surf - (e.y + e.h) <= 8) e.y = surf - e.h;
+  }
 }
 
-/* ---------------- movers: airships (Pt 3/4, sub-pixel + composite) ---------------- */
+/* ---------------- movers: airships (Pt 3/4) ----------------
+   Zack Bell's moving platforms, ported, not approximated:
+   - CONSTANT velocity along the route (his platforms never ease).
+   - Bumper reversal (Pt 3): at the end of the route the velocity flips,
+     exactly like bouncing off an oBumper — no sine, no easing.
+   - The platform moves in its END step, 1px at a time, and for every pixel
+     it moves every entity standing on it by the same pixel, and pushes any
+     entity it runs into (Pt 3/4), with PlaceMeetingException: the check for
+     whether the pushed entity can move ignores the platform itself.
+   - Composite objects (Pt 4): hazards keep a stored parent offset (dx/dy)
+     from the ship and ride it exactly. */
 function makeMover(def) {
-  const m = { def, x0: def.x * TILE, y0: def.y * TILE, cx: 0, cy: 0, t: Math.random() * 6.28,
-    dx: 0, dy: 0, px: 0, py: 0,
-    pos() {
-      const s = (Math.sin(this.t) + 1) / 2; // 0..1 along route
-      if (this.def.axis === "x") return { x: this.x0 + s * this.def.dist * TILE, y: this.y0 };
-      return { x: this.x0, y: this.y0 - s * this.def.dist * TILE };
-    },
-    deck() { const p = this.pos(); return { x: p.x, y: p.y, w: this.def.w * TILE, h: 10 }; },
+  const speedPx = 0.6; // px per frame, constant — his platforms cruise
+  const m = {
+    def, cx: 0, cy: 0, spikeRect: null,
+    px: def.x * TILE, py: def.y * TILE,
+    minX: def.x * TILE, maxX: (def.x + def.dist) * TILE,
+    minY: (def.y - def.dist) * TILE, maxY: def.y * TILE,
+    vx: def.axis === "x" ? speedPx : 0,
+    vy: def.axis === "y" ? -speedPx : 0,
+    deck() { return { x: this.px, y: this.py, w: this.def.w * TILE, h: 10 }; },
     update() {
-      const before = this.pos();
-      this.t += this.def.speed;
-      const after = this.pos();
-      // sub-pixel accumulation (Pt 4): keep fractions, apply whole pixels via pos()
-      this.dx = after.x - before.x; this.dy = after.y - before.y;
-      this.px = after.x; this.py = after.y;
-      // carry / push entities standing on deck
-      for (const e of [player, ...enemies]) {
-        if (e && e.standingOn === this) { e.x += this.dx; e.y += this.dy; }
+      // X route, 1px at a time; reverse at the bumpers
+      this.cx += this.vx;
+      let wholeX = Math.trunc(this.cx); this.cx -= wholeX;
+      const dirX = Math.sign(wholeX);
+      while (wholeX !== 0) {
+        const nx = this.px + dirX;
+        if (nx < this.minX || nx > this.maxX) { this.vx *= -1; this.cx = 0; wholeX = 0; break; }
+        this.px = nx; wholeX -= dirX;
+        for (const e of [player, ...enemies]) {
+          if (!e || e.dead) continue;
+          if (e.standingOn === this) { if (!tryMoveEntity(e, dirX, 0, this)) e.standingOn = null; }
+          else if (deckBelow(e) === this || overlap(e, this.deck())) tryMoveEntity(e, dirX, 0, this);
+        }
       }
-      // composite hazards ride at a stored offset (Pt 4)
+      // Y route, 1px at a time; reverse at the bumpers
+      this.cy += this.vy;
+      let wholeY = Math.trunc(this.cy); this.cy -= wholeY;
+      const dirY = Math.sign(wholeY);
+      while (wholeY !== 0) {
+        const ny = this.py + dirY;
+        if (ny < this.minY || ny > this.maxY) { this.vy *= -1; this.cy = 0; wholeY = 0; break; }
+        this.py = ny; wholeY -= dirY;
+        for (const e of [player, ...enemies]) {
+          if (!e || e.dead) continue;
+          if (e.standingOn === this) { if (!tryMoveEntity(e, 0, dirY, this)) e.standingOn = null; }
+          else if (deckBelow(e) === this || overlap(e, this.deck())) tryMoveEntity(e, 0, dirY, this);
+        }
+      }
+      // composite hazard: stored parent offset, rides exactly (Pt 4)
       if (this.def.spiked) {
         const d = this.deck();
         this.spikeRect = { x: d.x + 4, y: d.y - 8, w: 20, h: 8 };
       }
     }
   };
-  const p = m.pos(); m.px = p.x; m.py = p.y;
   return m;
 }
 
@@ -334,7 +435,7 @@ function loadLevel(idx, keepTimer) {
   shardsLeft = level.shards.map(s => ({ x: s[0] * TILE + 8, y: s[1] * TILE + 8, taken: false }));
   respawn = { x: level.start[0] * TILE + 2, y: level.start[1] * TILE - 44 };
   player = makeEntity(respawn.x, respawn.y);
-  player.cling = 0; player.canStick = true; player.sticking = false;
+  player.alarm = 0; player.canStick = true; player.sticking = false;
   camX = clamp(player.x - W / 2, 0, levelWidth() - W);
   if (!keepTimer) { /* timer runs across the whole voyage */ }
   fadeMusic(0.16, 1.0);
@@ -350,7 +451,7 @@ function die() {
   deaths++; sfx("die");
   startFade(() => {
     player = makeEntity(respawn.x, respawn.y);
-    player.cling = 0; player.canStick = true; player.sticking = false;
+    player.alarm = 0; player.canStick = true; player.sticking = false;
     fadeMusic(0.16, 1.0);
   });
 }
@@ -361,51 +462,80 @@ const TUNE = { groundAccel: 1.0 * M, groundFric: 1.9 * M, airAccel: 0.75 * M, ai
   vxMax: 6.5 * M, vyMax: 10.0 * M, jumpHeight: 8.0 * M, gravNorm: 0.5 * M, gravSlide: 0.25 * M, clingTime: 4.0 * M };
 let demoStuck = 0, demoLastX = 0;
 function demoInput() {
-  // attract mode: run right, jump gaps/walls, wall-jump by holding toward the wall
+  // attract mode: run right, jump gaps/walls, wall-jump by pressing INTO the wall
   const inp = { left: false, right: true, down: false, jump: false, jumpPressed: false, jumpReleased: false };
   const aheadX = player.face >= 0 ? player.x + player.w + 4 : player.x - 4;
   const groundAhead = tileSolid(Math.floor(aheadX / TILE), Math.floor((player.y + player.h + 6) / TILE));
   const wallAhead = tileSolid(Math.floor(aheadX / TILE), Math.floor((player.y + 20) / TILE));
   if (player.onGround && (!groundAhead || wallAhead)) inp.jumpPressed = true, inp.jump = true;
-  if (!player.onGround && (player.cLeft || player.cRight)) { inp.jumpPressed = true; inp.jump = true; inp.right = player.cLeft; inp.left = player.cRight; }
+  if (!player.onGround && (player.cLeft || player.cRight)) {
+    inp.jumpPressed = true; inp.jump = true;
+    inp.left = !!player.cLeft; inp.right = !!player.cRight; // press into the wall
+  }
   if (Math.abs(player.x - demoLastX) < 0.1 && player.onGround) { if (++demoStuck > 200) { demoStuck = 0; die(); } } else demoStuck = 0;
   demoLastX = player.x;
   return inp;
 }
 function updatePlayer(inp) {
+  // oPlayer 'step event' (Pt 2), in Zack Bell's order, verbatim in structure.
   const p = player;
+  // oParEntity 'begin step': refresh grounded state and wall checks
+  p.onGround = OnGround(p);
+  p.standingOn = deckBelow(p); // a deck under the feet is what the ship carries
+  p.cLeft = solidAt(p.x - 1, p.y, p.w, p.h);
+  p.cRight = solidAt(p.x + 1, p.y, p.w, p.h);
+  // Apply the correct form of acceleration and friction
   const tempAccel = p.onGround ? TUNE.groundAccel : TUNE.airAccel;
   const tempFric = p.onGround ? TUNE.groundFric : TUNE.airFric;
+  // Reset wall cling
   if ((!p.cRight && !p.cLeft) || p.onGround) { p.canStick = true; p.sticking = false; }
+  // Cling to wall: alarm[0] = clingTime; the alarm event clears sticking
   if (((inp.right && p.cLeft) || (inp.left && p.cRight)) && p.canStick && !p.onGround) {
-    p.cling = TUNE.clingTime; p.sticking = true; p.canStick = false;
+    p.alarm = TUNE.clingTime; p.sticking = true; p.canStick = false;
   }
-  if (p.sticking && p.cling > 0) p.cling--;
-  if (p.cling <= 0) p.sticking = false;
-  // gravity / wall slide
+  if (p.alarm > 0) { p.alarm--; if (p.alarm === 0) p.sticking = false; }
+  // Handle gravity
   if (!p.onGround) {
-    if ((p.cLeft || p.cRight) && p.vy >= 0 && !p.sticking) p.vy = Approach(p.vy, TUNE.vyMax, TUNE.gravSlide);
-    else if (p.sticking) p.vy = Approach(p.vy, 0.8, TUNE.gravSlide);
-    else p.vy = Approach(p.vy, TUNE.vyMax, TUNE.gravNorm);
+    if ((p.cLeft || p.cRight) && p.vy >= 0) {
+      // Wall slide
+      p.vy = Approach(p.vy, TUNE.vyMax, TUNE.gravSlide);
+    } else {
+      // Fall normally
+      p.vy = Approach(p.vy, TUNE.vyMax, TUNE.gravNorm);
+    }
   }
+  // Left
   if (inp.left && !inp.right && !p.sticking) {
     if (p.vx > 0) p.vx = Approach(p.vx, 0, tempFric);
     p.vx = Approach(p.vx, -TUNE.vxMax, tempAccel); p.face = -1;
   }
+  // Right
   if (inp.right && !inp.left && !p.sticking) {
     if (p.vx < 0) p.vx = Approach(p.vx, 0, tempFric);
     p.vx = Approach(p.vx, TUNE.vxMax, tempAccel); p.face = 1;
   }
+  // Friction
   if (!inp.right && !inp.left) p.vx = Approach(p.vx, 0, tempFric);
-  // wall jump
-  if (inp.jumpPressed && !p.onGround) {
-    if (p.cLeft) { p.vy = -TUNE.jumpHeight * 1.1; p.vx = inp.left ? TUNE.jumpHeight * 0.75 : TUNE.vxMax; p.sticking = false; sfx("jump"); }
-    else if (p.cRight) { p.vy = -TUNE.jumpHeight * 1.1; p.vx = inp.right ? -TUNE.jumpHeight * 0.75 : -TUNE.vxMax; p.sticking = false; sfx("jump"); }
+  // Wall jump
+  if (inp.jumpPressed && p.cLeft && !p.onGround) {
+    if (inp.left) { p.vy = -TUNE.jumpHeight * 1.1; p.vx = TUNE.jumpHeight * .75; }
+    else { p.vy = -TUNE.jumpHeight * 1.1; p.vx = TUNE.vxMax; }
+    p.sticking = false; sfx("jump");
   }
-  // ground jump + variable height (Pt 2)
-  if (inp.jumpPressed && p.onGround) { p.vy = -TUNE.jumpHeight; sfx("jump"); }
-  else if (inp.jumpReleased && p.vy < 0) p.vy *= 0.25;
-  physMove(p);
+  if (inp.jumpPressed && p.cRight && !p.onGround) {
+    if (inp.right) { p.vy = -TUNE.jumpHeight * 1.1; p.vx = -TUNE.jumpHeight * .75; }
+    else { p.vy = -TUNE.jumpHeight * 1.1; p.vx = -TUNE.vxMax; }
+    p.sticking = false; sfx("jump");
+  }
+  // Jump
+  if (inp.jumpPressed) {
+    if (p.onGround) { p.vy = -TUNE.jumpHeight; sfx("jump"); }
+    // Variable jumping
+  } else if (inp.jumpReleased) {
+    if (p.vy < 0) p.vy *= 0.25;
+  }
+  physMove(p); // oParEntity end step: pixel-stepped collision
+  p.onGround = OnGround(p);
   p.animT += Math.abs(p.vx) > 0.4 && p.onGround ? Math.abs(p.vx) * 0.055 : 0;
   // checkpoints
   for (const c of level.checkpoints) {
@@ -440,6 +570,8 @@ function updatePlayer(inp) {
 function updateEnemies() {
   enemies = enemies.filter(e => !e.dead);
   for (const e of enemies) {
+    e.onGround = OnGround(e); // oParEntity begin step, same as the player
+    e.standingOn = deckBelow(e);
     if (!e.onGround) e.vy = Approach(e.vy, TUNE.vyMax, TUNE.gravNorm);
     e.vx = e.dir * 0.7;
     // turn at ledges and patrol bounds
@@ -459,6 +591,123 @@ function updateEnemies() {
       } else die();
     }
   }
+}
+
+/* ---------------- physics probe (?probe=1) ----------------
+   Deterministic measurements of the ported engine, run headlessly:
+   jump apex (full hold vs tap), run stop distance, chimney wall climb,
+   slope-staircase climb, and ship-carry fidelity. Results go in the title. */
+function runProbe() {
+  const results = {};
+  const blank = () => ({ name: "PROBE", sub: "", solids: [[0, 18, 40, 4]], slopes: [],
+    through: [], spikes: [], movers: [], npcs: [], shards: [], enemies: [],
+    start: [2, 18], checkpoints: [], goal: { x: 38, y: 18, w: 1, h: 3 }, door: null, sw: null });
+  function setup(lv, px, py) {
+    level = lv; levelIdx = 0; doorOpen = false; switchLatch = false;
+    movers = lv.movers.map(makeMover); enemies = []; shardsLeft = [];
+    respawn = { x: px, y: py };
+    player = makeEntity(px, py); player.alarm = 0;
+    fadeDir = 0; fade = 0; pendingAction = null; state = "play";
+  }
+  let prevJump = false;
+  function probeStep(inp) {
+    inp.jumpPressed = inp.jump && !prevJump;
+    inp.jumpReleased = !inp.jump && prevJump;
+    prevJump = inp.jump;
+    updatePlayer(inp);
+    updateEnemies();
+    for (const m of movers) m.update();
+    frame++;
+    if (fadeDir) { fadeDir = 0; pendingAction = null; player = makeEntity(respawn.x, respawn.y); }
+  }
+  const idle = () => ({ left: false, right: false, down: false, jump: false, jumpPressed: false, jumpReleased: false });
+  // 1. Full-hold jump apex: vy=-8, g=0.5 -> 8^2/(2*0.5) = 64px
+  setup(blank(), 100, 18 * TILE - 44);
+  let minY = player.y, jumped = false;
+  for (let i = 0; i < 120; i++) {
+    const inp = idle(); inp.jump = true;
+    probeStep(inp);
+    if (player.vy < 0) jumped = true;
+    minY = Math.min(minY, player.y);
+    if (jumped && player.onGround && i > 5) break;
+  }
+  results.jumpApexHold = Math.round((18 * TILE - 44) - minY);
+  // 2. Tap jump apex (release after 1 frame: vy *= 0.25)
+  setup(blank(), 100, 18 * TILE - 44);
+  minY = player.y; jumped = false; prevJump = false;
+  for (let i = 0; i < 120; i++) {
+    const inp = idle(); inp.jump = i === 0;
+    probeStep(inp);
+    if (player.vy < 0) jumped = true;
+    minY = Math.min(minY, player.y);
+    if (jumped && player.onGround && i > 5) break;
+  }
+  results.jumpApexTap = Math.round((18 * TILE - 44) - minY);
+  // 3. Run stop distance: accelerate to vxMax, release, measure slide
+  setup(blank(), 100, 18 * TILE - 44);
+  for (let i = 0; i < 60; i++) { const inp = idle(); inp.right = true; probeStep(inp); }
+  const stopX0 = player.x;
+  for (let i = 0; i < 60; i++) { probeStep(idle()); if (Math.abs(player.vx) < 0.01) break; }
+  results.stopDistance = Math.round(player.x - stopX0);
+  results.runSpeed = Math.round(6.5 * 60); // px/s at vxMax 6.5 px/frame
+  // 4. Chimney wall climb: 3-tile-wide shaft, 7 tiles tall
+  const chim = blank();
+  chim.solids = [[0, 18, 40, 4], [15, 11, 1, 7], [19, 11, 1, 7]];
+  setup(chim, 16 * TILE + 6, 18 * TILE - 44);
+  minY = player.y; prevJump = false;
+  // wall jumps need a FRESH press (keyboard_check_pressed), then a HOLD —
+  // release the frame after the press and the variable jump cuts vy to a
+  // quarter. So: press on a new wall contact, hold 8 frames, then release.
+  // steer persists across the whole flight: after jumping off one wall,
+  // steer toward the other — air friction alone will not carry you there.
+  let lastWall = null, jumpedOffGround = false, jumpHold = 0, steer = "right";
+  for (let i = 0; i < 600; i++) {
+    const inp = idle();
+    const wall = player.cLeft ? "L" : player.cRight ? "R" : null;
+    if (!player.onGround && wall && wall !== lastWall) { jumpHold = 8; steer = wall === "L" ? "right" : "left"; }
+    if (jumpHold > 0) { inp.jump = true; jumpHold--; }
+    if (!player.onGround && wall) { inp.left = wall === "L"; inp.right = wall === "R"; }
+    else if (player.onGround && !jumpedOffGround) { inp.right = true; inp.jump = true; jumpedOffGround = true; jumpHold = 8; steer = "left"; }
+    else if (player.onGround) { inp.right = true; }
+    else { inp.left = steer === "left"; inp.right = steer === "right"; }
+    lastWall = wall;
+    probeStep(inp);
+    minY = Math.min(minY, player.y);
+    if (minY <= (18 * TILE - 44) - 112) break; // climbed the full 7-tile shaft
+  }
+  results.wallClimbHeight = Math.round((18 * TILE - 44) - minY);
+  results.wallClimbReachedTop = minY <= (18 * TILE - 44) - 112;
+  // 5. Slope staircase (Isle One, L1): drive with demoInput EXACTLY as the
+  // live loop does (step() hands demoInput's edges straight to updatePlayer —
+  // recomputing them here would cut every jump to a tap).
+  level = LEVELS[0]; loadLevel(0);
+  let maxX = player.x;
+  for (let i = 0; i < 600; i++) {
+    const inp = demoInput();
+    updatePlayer(inp); updateEnemies();
+    for (const m of movers) m.update();
+    frame++;
+    maxX = Math.max(maxX, player.x);
+    if (fadeDir) break; // died — stop, the measurement is the distance reached
+    if (player.x > 24 * TILE) break; // past the staircase onto the second isle
+  }
+  results.slopeClimbX = Math.round(maxX);
+  results.slopeClimbPassed = maxX > 24 * TILE;
+  // 6. Ship carry: stand on the Isle One mover, no input, 180 frames
+  level = LEVELS[0]; loadLevel(0);
+  const mv = movers[0], d0 = mv.deck();
+  player = makeEntity(d0.x + 4, d0.y - 44); player.standingOn = mv;
+  const px0 = player.x, dx0 = d0.x;
+  results.carryTrace = [];
+  for (let i = 0; i < 180; i++) {
+    probeStep(idle());
+    if (i < 12 || i % 30 === 0) results.carryTrace.push([i, Math.round(player.x), Math.round(mv.deck().x), player.standingOn === mv, player.onGround, Math.round(player.y)]);
+  }
+  results.carryPlayerDx = Math.round(player.x - px0);
+  results.carryDeckDx = Math.round(mv.deck().x - dx0);
+  results.carryMatches = Math.abs((player.x - px0) - (mv.deck().x - dx0)) <= 2;
+  results.stillStandingOnDeck = player.standingOn === mv || player.onGround;
+  return results;
 }
 
 /* ---------------- rendering ---------------- */
@@ -578,7 +827,7 @@ function drawLevel() {
   for (const m of movers) {
     const d = m.deck(), x = d.x - camX;
     const im = IMG[m.def.ship === "red" ? "ship_red_small" : "ship_white_small"];
-    if (im) ctx.drawImage(im, Math.round(x + d.w / 2 - im.width / 2), Math.round(d.y - 40 + Math.sin(frame * 0.03 + m.t) * 1.5));
+    if (im) ctx.drawImage(im, Math.round(x + d.w / 2 - im.width / 2), Math.round(d.y - 40));
     ctx.fillStyle = "#151312"; ctx.fillRect(x, d.y, d.w, 5);
     ctx.fillStyle = "#4a3b28"; ctx.fillRect(x, d.y, d.w, 2);
     if (m.spikeRect) {
@@ -701,9 +950,9 @@ function step() {
   if (keys.Minus && levelIdx > 0 && !fadeDir) { startFade(() => loadLevel(levelIdx - 1, true)); keys.Minus = false; }
   if (keys.Equal && levelIdx < LEVELS.length - 1 && !fadeDir) { startFade(() => loadLevel(levelIdx + 1, true)); keys.Equal = false; }
   const useInp = (demoMode || DEMO) ? demoInput() : inp;
-  for (const m of movers) m.update();
-  updatePlayer(useInp);
-  updateEnemies();
+  updatePlayer(useInp);   // oPlayer step event
+  updateEnemies();        // enemy step events
+  for (const m of movers) m.update(); // moving platforms move in their end step (Pt 3/4)
   timerFrames++;
   camX = clamp(player.x + player.w / 2 - W / 2, 0, Math.max(0, levelWidth() - W));
 }
@@ -721,6 +970,10 @@ function loop(ts) {
   render();
 }
 loadAssets(() => {
+  if (new URLSearchParams(location.search).has("probe")) {
+    document.title = JSON.stringify(runProbe());
+    return;
+  }
   if (new URLSearchParams(location.search).has("test")) {
     // oGame debug self-test: run the demo pilot synchronously and report state
     state = "play"; loadLevel(0);

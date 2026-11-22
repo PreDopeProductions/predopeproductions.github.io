@@ -9,13 +9,16 @@
 <canvas id="game" width="640" height="360"></canvas>
 <script>const ASSETS = {"player_walk": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMAAAAAwCAYAAABHTnUeAAAErElEQVR4nO2du27jOhCGRwdbCFQXP0HqAGkCuEoKP7bqdC4D5DXUkUjnbQ61NE3xOkNSyvyAEDuxP17EuWhExwAsFovF+p0aUl4shLiZz5VSSe9nPvN74/+XC9/6Xa6Yz/wW/GgDsDXPM7oFM5/53fKFEDd9fH5+rj+Zz/w98/+4QOZz24rmeb77mdNR5jO/F/5dCuTLozDCCfOZ3xv/7k2+iwal1GCGlI+Pj+QGmc/83vjRBmBqnmf0ATCf+S340Qbw/f0NAAAvLy8AkBdyWvKllAAAME0T8z1t7JWfOz9RZVC9OM3HmDVcar6eHPMx891tSClBSrkrfsn8ZN8HYLGOoNUAYi1Gpyip2uKb3p+Cb0uHyD3xc5mxfIw2sCNGLj91HF1FgNzF75MZHlksW6sBUN6W7oVf4uV66D/z8dVVBMAWe39WSEEDMHN07BSFkm0LI492yTQyqjaOoF7n5tARgJWv3L06LVRiXGwAO5F5kqlSO7ON9/d3kja0qMaQyv0VBnC5XFp3gdWp7gyg1ZU8Vv5v8ik8zF4rHb3wS68DKPqfFAGkUutRKvsGGDbf1NfXl/P31Ddvnp6eSPl71+12I5ufcRyjXvfwgRifJiHWx1KptE/UBySVIuWz+tA0TV2VpzcjgFJqoA6Zexb1/Gg+VRuabXtKM00p8dDjOK6HLYySqM3PLRI8GEDrPPFo/NQ0qLf+U/NTjQy7/0kpkJmbT0IAIObqkxCkfFZf6iUVSroInoRYD0ytYQyR31Pps/Ri+OipaE6qtSwLypw0uw/w/Px8NwBXrohRpdGGEFsVoBDWybJz556rTKExj+MIp9MJAACGYcien9fX19y3AoDDAIQQN9Pj2AsVWxR8pdRwvV7hcrnclUCxjEApNWjjLDl5uSq5iLTPr2uhUvNLZPKXZRmu1+v6t5x+R0eAt7e3ZHhI1MYVI6x7AVuGgL0Aam4qO51ORVEmZuw6CmAqZY6iDKDWQm2ZppSoRRSgFsXCrKGqnwijvpPKOqaoHV0K/8EAfKUprI7XKH9JKZ1bICjH4KrW5KQQMfOTO44Ytj2OlDHE8EvSQpPvc8CxbfyK3aCmsHNyn35+fmo1tWthVrNSHcODAdTIZ802qEp51OOg5IfYJVGs9rxgfykGdv+TIgC1R7P52DeAtPe3uVjXMrXr8hTRzCwxYrOpleMYog1gb+G89mLU7VFc4HGx4VFYcxLcCxT6j7wYnaghKo8WMrTePWlN46JcL7mOxxsBqBe/b/HswbhabEXQJ5oy/cESRpWGWpsGsNV5qj3qlCmWa7JLx7C1+Hs5sRgyx9LzvqPz+Zz9XmcK5Fr82vOoHWxRpj5ZLv6RFj6FMJ0mZtrm3AxnPj+fz9W3KGBOFvbCtBf/sixD7cXPxvZPJd4fIHANUApvoZqhusZC5ArQvbDn49B3gtlTHlsYDtr7mWBzr3VNtfB65vfM+l7Xw4Vhy3b10aJ9CjkjgFnpsY2AevBKKX2hffv/yFaor7ot6whGDTPvD7VBZcwUCzG2rzmRNcTOGYvPQcfyogZCVfKj4GYw9evJqxSYXwyHVSiI4es5TT0vIXbO+d9i+go1Pt5f4jk3x2i1nacAAAAASUVORK5CYII=", "rebel_walk": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMAAAAAwCAYAAABHTnUeAAAEhklEQVR4nO1dO2/jMAyWDzcY7pYpk29tlgJd8nf6fzNmSdfzmMFbhG695eQqiqwHRerh8AOMNmny6WF+JEXJqBAMBoPBeE50MR8ehuFbfy2ljPo+8zN/bfy/oORr70HB/Mxfgj9YACYu44iuYOZn/tz8IAFcxlEcpkn8fX1FUzDzM38J/t/mG7486jKOdz9jwfzMXxP/XQRw5VEY4Yr5mb82/ocIsNawlLLTVfXn8xMtf2N+5i/FH1UFOkyTOEwToIvMz/x18t+pxFU2UupSDUBCDvPXy6/aaJUfOj9BEUAPLep3zBou85fl13kv4ygu49gUf8r8gPcBGIwtYBFAqGKgOdwav1muwuY30SI/Rt7s639qG9gRA8ofO46qIgDFAglab2Y8BxYBUG5L18KfIrAa+s/8+KgqAmCDvT/DB68AdCPCTlEouU1Q8eccQ8uodW42HQEYcLQUPVPExQJoBPpNpjLOnF6aagyxvE8hgI/9vnQXGJXiTgClVvJYnkfnp/AwrVY6auFPvc8U/Y+KADcplysVNgPF5NdxPp+t71Nv3ux2O1L+1kH1QIwQQvR9H/S5oOPQCi/DsPx+kzLuiXoPblKS8jPqwGGaqlpgr0YAKWVHHTJbBvX8KH6qNhS36Sn1NCXFQ/d9v1wmMFJekx9aJHgQQOk8cWv8sWlQbf2n5o8VGXb/wWsAPV3BwMswkPIz6kItG2NRAngZhuXChApjmPw1lT5TF8NbT0UhqdY8zyhzUmwfwHxm05YrYlRplBBCqwIUwLpZptesucrkG3Pf9+L9ehVCpD0f/Pb2Bv2qEMIiAPWAsXqN+fCyDRT8UsrudDqJj/3+rgSKJQIpZafEST0/NqSkD+b9tRkqNX8KdP55nrvT6bT8DdLv4Aig1IqJEsZjAmsvYG0s2AaQM3d+v16TokzI2CnsKmaOggSQy1BLpikpqEHI2KAwzBzI+kQY9U4qY5ugdnQx/A8CcG0iYHU8x07gZRytRyAox2Cr1kBSiJD5gY4jhNscR8wYQvhT0kKd3+WAQ9t4itOgOrBzche+vr5yNdU0MKtZsY7hQQA58lm9DapSXovVq1DulCiWe16w/ykGdv+jIgC1RzP5sTeAlPc3ebHWMrnr8hTRTC8xYnNTA+IYggXQWjjPbYyqPYoFHhcbHoE1J97j0K6GWtqip/JoPqHV7klziovSXqCOxxkBqI3fZTwtiKvEUQR1oynTHyxgVGmosSqAtc5TnVGnTLFsk506hjXjr+XGYkAfS83njo7HI/i71hTIZvzK80jkxxUpQH2zbPxbMnwKYDpNzLTNehhOf308HrMfUcCcLGzDNI1/nucut/Gz2H6Q4v2F8KwBUslLIGeozmGIXAG6B/Z8bHonmD3ltoHhoJ3PBOtnrXOihNcbhuFbXa7P1bAwLNmuukq0TwFrBNArPaYIqAcvpVQL7e//Fxi+vqq2jMsbNfS839cGlZgpDDG0r5DI6uOGjMXloEP5ggZCVfKj4AVwqs+TVykw/zEcVqEghF/Naex98XFD7v8ap6tQ4+L7BxCWAGQDn3JTAAAAAElFTkSuQmCC", "player_idle": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAsCAYAAAB/nHhDAAAA9UlEQVR4nO2X6w3DIAyETdRFGIQF2I+JGCSjuD8qKseF5gykipKehPLEHxcbkhBhYtlyzgz2g6WDw5BHJZCUkwc5580W0fIluDznKtcgaQc1MRE5OeoQQheQkWZNsByJpSPsYNm/5aWUkjyEBwMBSnAFMQGmTxwNOEwF0F3ne0LmARERxRi7AFCZruv63vfe1/o29bMcXANwSCVBDkRiNwmfBhhRC+BE+5DFhQY08yAfk0XnKtMeFwhgqHw1gPcCWl3oYC1AbSG842LHDL+a53+29AodibRmKtuLJbmhoY8yqwPzsnGKR/QH3AxgnhM9DsofJ6QncWNJ1nD+yiQAAAAASUVORK5CYII=", "npc_pilot": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAsAAAAuCAYAAAD+zeOjAAAAwUlEQVR4nNWU0Q3DIAwFH1XnYQOmYAzm8UQezP2CmmCCE5FKtRQpiY7HgRMC7JLDcwCAlwNs7yx4WktY5DtRcGoAQLiiIRWWeuWcwcxg5jF6Nm2FU0pN19Qgogo10EwmonZfSukGeBd4rynWXk/hS8neEi/c7YbL+zHnS/D4iaoWd63fr6HTTVir6HqfpcYYfRpWuoaXXdy3G+o/nE5tHop7NR6FuzX9TmN2Ni+Thx7c1jhVWCUPg/+k3Z23J7kN+ADHiyvVUOyk7gAAAABJRU5ErkJggg==", "npc_rebel": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAuCAYAAAAhg5m8AAABGklEQVR4nMWW4Q2EIAyFH8YFHKi5IdzUDS4MdCP0/hxYoNgiMfcS4w/p42uhYMApRqkAh9KgOrg3rtEKAO9tUz++Ph8PBBBjZACc3spzjfYLzCKiZoxiFABg8TGqFJwNiCgQUVOofd97wVkNQYVvqp7VWs4mXhLk4N6yampSSMFek2Qwip7Ey0RwQXBXYYGz63pakxOMVGRRZZPNppAJTPVae5pgxqBt516hniIAIIpo7H25V4rlVgkc+NnQk8LlTs0Gy3F4Z9cNpMltA6eKvikMlAPV7NTu8hgGjMGLpStp4D5YmE/YaQJtVja+F/rreeAyMO8MzWDomFcJYozF+47k/9K4qp+uZwmumsUaA+ChfTCUt7wbbxXsC9FXWRAajzaGAAAAAElFTkSuQmCC", "npc_rebel2": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAuCAYAAAARD4idAAABAklEQVR4nMWU243CMBBFjy0acEFW2qCF3ZXoBugAukCKXJBLmP2JzcQZhyhCcH8SZ+6c8SNjx1PCXE4PPH3NEqsxpbSS8zQJICklKe8WUWKML4kecCklYoxtbLmYGKPTAYt+aD8osrRULQFkDGGxIJ0hYwiLzCFnAOcBJgKP0wnrWRezRa4QpxL8/P3W4PV8qb6XxDLvzaXfaxxDEK8G24lrZg8w5GyeqU6cHaHew+Pt3i/d05Czq7+Zpk3BPrGUU0dXVYnX8wUaqqmm+8wu1OYuaN9ZGy1bNdvwtfiu0t0e3k1cpX6+Z+qWWUZznt/pa/leacC47MvtW1S68dAzKDmAfxroXs3xybTyAAAAAElFTkSuQmCC", "npc_bride": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAsAAAAuCAYAAAD+zeOjAAAAw0lEQVR4nOVU2w0DIQwLqGuxAtvAEoyVwdyf5o5HwkF1lU5q/kgcYyUYR22gOzvr0AMHnNcqAAhoemGCjcCqjFNL38DMRyKEIJiGmZgZCuiIWjNCCFMZLwGmlITxUjNkVM6ZexhHJzfMZFDOWaujZt9ZCnlaWMbXzP8BLqUcSWuL98jQ2BtwLWWLOcY45Bwpb0M82FvLfxoGv23JWAZbPrz6ZOYe3Jahsd7GrI7y9+956TvQmM3VP82wzwObM7eYoTW9AUuUMnyDaw5hAAAAAElFTkSuQmCC", "npc_skeleton": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAuCAYAAAARD4idAAAAx0lEQVR4nM2UWw6DIBBFL6RLAPYIfLIWdY9t90B/CuUxI2gT4yQmiifnDg8V+FVEXaJ8kAzUjSUQIQSCbQTWuwggWu9iui+u2mi9o4zZKrm3bVUz+8ZiW9YOJI3Wu64VEjRKwyhdweVkqLXkjUZpHhzZAEDOQGQ0U0JuyypGUDZycDk+vYUXg+XSVWC5K8/361h0smaQ2+NdYxs7FZ0WvQMp25TxP7CNJQ8F19v56NEBPjeZPetdDi7A93nXr/BikPtfPkZAqg8EOElcn+054AAAAABJRU5ErkJggg==", "npc_figure_a": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAuCAYAAAARD4idAAAA3UlEQVR4nM2VTQ6EIAyFX4nnmMQrsOf07L0CiRfpLAQU+yOT2fgSE38+XgttKuEUYxRdH4IBiXdBAVS4g8yaqczDpwAKE9AYuinnrHEcanhyIOFIAJBSQinFziHnzAC4lNIvHPlzC43m5ElUZo8Re4wqqB7PHRbH89k2bR0tOHbLKryuqN+749BSmp6653XgtcbrsWOgnsjvjm7HWI6XsD5401AZ123W8Q9QCUvipsocVG9pCjidbjrex8vyBDw61kVy4jallNQ8p3dt7VJUSHNUZ9GLSmj+SsIMBABfAkVE64nxG5cAAAAASUVORK5CYII=", "npc_figure_c": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAA4AAAAuCAYAAAAY5CjnAAAAzUlEQVR4nOVWSwrFIAycSK/liTyPJ8rBfJsqafwk9nVR6ECwSoaZRAkl+FDUnugGCQAQnIoNzAwAHkGUGszcVlIJEiTPT6XO6qiOeja0dThsklSLMZJOMOOssa/DCQKc15Fz1u5sYiUpMgL2bF6ItxDgfD6PKn6FuN1ZUzGl1L7l63m0RhLRoaoGRRhC2l0puuAmalWLOLUviWWVuCKakHb1QB4pjiYE/d/VUtyjxz8ep2wD0krLf98EmHZsR/HSj/fV+DXi5U53FesfCH7P70Jv4rWE3wAAAABJRU5ErkJggg==", "ship_white": "data:image/png;base64,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", "ship_red": "data:image/png;base64,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", "ship_white_small": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEMAAAA+CAYAAABwdqZsAAACt0lEQVR4nOWZTZKEIAyFn11zLVZ9MS/GioM5m6YnMgHCTxD0VU2Vo4jh4xHSuuFaHeR4uyyKj17K/R/kT9L2UqnCcM7BOef/jYIJ2lwmNRjOuYMc0wEDCbfQ+0ZLe5mcxEA5XSPHlwBRgZEbTAqKMUbUh4aGOiOnENBoIN1h9BiAd0ev/qSawhnW2u+xd0dwbgiQrjB6Br3vu1rfMU3hjFCcOz7nVYF0g6ER6L7vQ4FM4wxm0KlrhwaULjA0ZyvMHZrPncYZnLw7uOVC2nQD0gxjZB2gDaQJRm8Q3GCpO7RjmXqZcIq5A2hPrNUwRi6P0B0pIJ/2VbFVwbjqJ/a+70VASuMshqENIpEks3kjcp84XjEMrUKnVCXu8JLGLoIxAwSAd4cUyOf+JJQsjFlAUFF31CgGJQljRhDeHTXLhenrBGW5OiOmWiDA36QnYdDXbzOJcwfQBgQQOMNaC2NM84NmlLX2Oz4Ax4/kpnAG3u+3TnQFcs7BGMPmj1R84aTSccWc8f3i5RuHD5zZKVxsYczMjrT5L98Hzl/B2V2EW6deNW7xOSnsr6Qvzh1hPyEERhvAOyO6nVKXhPLkr3INB4PmukRt8jUBzRmhO7IPT53jgGjkGpo7OCWKs39jFSVQ2iklHDuOBSFxTAyY5N6CypSddJozukoSFLfsKIwcgIaSfCyMycXCeOEPxBZrVKuSJVWyDAuWQ5E2nGEA93dJdMJfqYtP021+tQqVnPiXpNFTJIFwlxySHavUESsDEbteXIEuqOKlf0cY1fnvTjCaN4E7wOi2E64KQ6UUWGVrHVIHzeiMywrA3IN7uGKZ6jYVaCuIZSB4xQJuAbEcBC8u8FoQy0Lwyn4rKexjabW83boNBK/SrfV2AKjoO9DY9cco5oxHQfDi3oE+EgTwH8ZjQQBnGI8GAQC/GGbHZvSdIfUAAAAASUVORK5CYII=", "ship_red_small": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEMAAAA+CAYAAABwdqZsAAACvklEQVR4nO2a25GDMAxF5UwaoKJMKqIFWqCiTCqiBO9HIkYRtvx+YPZ+bNjgl46vhQMo6EOaHKtWg7i36phIu4vUgXUr1bCnNADAe5ps5zQtYymXTc1gvKfJ5ogdwLfcDwShXrKaLBMakG22S7vApOrOQBCPbbOdd4Io5Y6qMHgQLWZfUjUYFITNFbHt5VIVGHTgr3nG74B/11rFYfAZXJalWNupKgqDD9bkip5UDIYJRE5X2PpJUfZ9hmlwNCdwV/SSLwAyO0OapRKu8Ok3RNlg2AZEl0evuQKVBYYEopZyuCMZhmsQkityw0oFEp1AXR33lBh9FeUMXxAtckWKO4JgvKdJh4AoeQWRFAvEG0ZMB8uyWF1RehnFjNcJw8cNqB5cQRUydgABRmhDfKYlV9SWbxwHGKEQuHpxBZdPTDuMFAh8efTkCipXfDefQpLOuJ+wKWkHSkH07goA9+3GGwDox7bBa56HmmXUa54B43Np347jrNJKz3UVO+F1e3JFzGX+Dp9nlxor0k9skEPp2UGmScLjrzA/Hp7Z3smJPYmaoCAQ036itStMk0PH5SENAIr+av0Bgg3iJ96kWdj5FnuKx7aJ/RrcYJIG5g7+E16RgofGpc5LucI466zvRO2x2u5nHFxi6pweS3nElIif62qs45OPOADqBNuxj6QXP6I2Yq6OKRie7Hzq+5aJkMoO48RS2R8iSVZ1HYeUyyQFJE+63o8a3R0/F4zW73T1JOcyafYaYgv9O+Mjtf/x0Ci5Q4w3dBmcGYoz1tBlQi9Fwyk2ZwwJJTWBDgUl19VkCCglA+gt2TpjrTmbPcDJemnNrdqAuoYRqhzwrDGfDQYqFYox7rPCQKVAOcR+dhioWCjK+s8ASoIyGgxUDBTxhvAo8gVzCRhcVjhXhIE6QLnybb+DEa4MA4ABuToMAALkD/dIV39K3wzcAAAAAElFTkSuQmCC", "sloop_red": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEEAAAA+CAYAAAB0g3ZRAAACAklEQVR4nO2a222DQBBFLygNUBByBxRLB9YWRAcmH2YJxizs7HNmwpFioRgDc7j74AHc3EhhXv6y0ebcuBS4S8iaAAtnCTOApsSOuEooJgAld0RgL+CqSUTX8BO7gcQ4E/DsusMfPKYpeqecJBwKcBUPAI9pSpJkLn1C0T5gDwcJQQJSpQCoL6FqAiw1JbAQANSTwEYAUEcCKwFAeQnJBDy7Ltl1RUkJoaNAhkP5hFUsHcwAYIz5+OdrGNbl2OFSjAQPgmsRI+Fs+mwJTUTtyVIyYvoOFRLacbSLQSOGCgnAd8dJQbyETQos5DSIl5ACdRKWZkFKgyoJxhj0fU/+nSoJFmoaVEqgok6CbRKUNIiXsL2QCkW8hDN806BCwj4N1FGixd/z/yJPgHPhahYXaZiB9xOoZrPSdmVWl9kH0+Ovwl/DcLjegrO2faEp0pBa3uGdpSOslHYcr5qDPcY1CfsvT0XYg9kMQ/vlYmlyFkqcNboOUnT/QKRxjQ5Jz6AxZk0KddlnO7GcFas5Ddtm70yCXfFfcDVZ0ixirc1nxqhZBAD/abNWEc36QUByZ+msldOLW7m4PNHUq0iVzSLkUlqSCK9jDb2fIEnEJTE3VRookZGjCE4jiFd9ks+kj+ysfQIH1LzRGouqF7yrokFCdBo0SIhGi4SoNGiRAMge7m9Y8Avj65kxx4GbhAAAAABJRU5ErkJggg==", "ship_white_large": "data:image/png;base64,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", "ship_anchor": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAQcAAAEeCAYAAACHctD0AAANS0lEQVR4nO3dPXbbvBaF4eNvZRoqMhA3yizUWsNS7WGo0UBSaCC+RS4Sigb/8bMP8D5rpUiWI1MksHUAEtCbobjT6fQ1/Pvz+XyrdSzAlP9qH0BvxsEw9W9AbYRDQXMhQEBADeEAIIpwABBFOACIIhwARBEOAKIIByHcsYASwkEMAQEVhIOQ8/lsZgQENBAOYggIqCAcBBEQUEA4iCIgUBvhIIyAQE2EgzgCArUQDg4QEKiBcHCCgEBphIMjBARKIhycISBQCnsXDtTucKHjr3G/382M/SeRD5WDU1QQyI1wcIyAQE6Eg3MEBHJhvDrweDyydrDL5ZLz5c2MOYijQshyHgmHF7nD4ai14ULD3ocvG3rV9Zufoh4SQ1OB0XvD3oNweNX1m5/jKSCGhmHRe+PeinB41fWbX+I1IILL5dJ9A9+CcHjF3YoZ7+/vrhvH5+cndzGwG+GwgIBArwiHDhAQ2INw6AQBsV3v54twWMH70CIgILbr+XwRDh3qucHv0ev5Ihw68/HxYWb9Nvi9ejxfTZTLpXh/7iG43W5N7AdRusN6Pld7UDl0itWcWEI4dOh6vZoZAYF5hEPnCAhM+VH7AFDf+Xy2+/1up9Ppy9O4+vPzM+vrj1e85g5QtXMvdTDqWpmQDG6328vfvU1SerseS/txqJ13qYNR560xLhmHg5m/gDDzf11CaKidc6mDUee9EY7FwsGMgKhN5YlcJiTxjcdJSpUOlcLj8fhSCDvCAVEERH21A4JwwCQCor6aAUE4YJbHgEAahAMWeQsIqoc0CAes4i0gcBzhgNUIiL4QDtjES0AwtDiOcFip9m0lJV4CAscQDtiFgGgf4YDdCIi2EQ44hIBoF+GwAvMN8wiINhEOSIKAaA/hsICqYT0Coi2EA5IiINrBHpIzclcN423DQscaC7tFe+F1T0q8IhwyG+62FHZYOvIagXpg1A4IhoPHEQ4bTW2tVlo4DuWQqB0QOIZwWEklFMbUQ4KA8IuLNTIsR1MHwtKwYmrOYa0tAVE67EpuWtvqkKL0YjLuVkRcLpfF7xhQdLvdZCsc7mL4QziMhFDI/W1KOS0FRK0AKREQrVYNNRAOA6HReg6GYCoAalcWVBB+dDUhubZBehxSrLE1GPbeel0rdUC0EOpKugqH3txut9WTlLmDAP4QDkJydNCjr3n0DsoWw2Mt+XsRRzjgr9odMvz++/3+NyhqH1PPmn3OQXFysfZchreOtrWSUH0QLIUaG+ZSORSUI6hqB05OVBJ1NRkOPd0mWwqcFsKDkKijyWFFCIdhA2q55Nyi9nMOKUwNN1q9xrW+g6O5cBhWDeNPl1Ybz17eg2IcEqWu79bzdvS4CIdE5sLBjIAY8x4QZv9CIvWcztrNeLba0gZrfnNXU+EwnmtoZWel3FoICLM013Vujib1PMea460ZDk1OSC7Z8uRgD67Xq+uA2Hstx+9Z7SnR2t/32Ww4MJvdvjWhoBx6Uxv11A6FQOIgUlg7pBiienil3JFipuYa9r6P3JvxzAltUSUYzBqrHMKWZGjfMBi8hdpYeH5DbRu9JvZz2PvQk/dGlZqXSqq1YDArs33eVs1UDsOSj/mGNixVgd6f/lQOBrNGKodgz5DC+ycPfFIPBrMGwqGndRRog4dgMGsgHMwYRsAPL8Fg5nzOIVXVwENR9d3v92+3JGtfk/GcRso7YR6+5Md1OJh9rxqoIo7x/rRkSnvXanifKA3chsO4auD5Br9au3bjUPEaFm7DAfBiGBaegkJ6zDPndDp9DYcQKXYIqj3GVVFyWBG7br1cB6VHpWNc3q3g9mXbepnzUP/qPpfhYPb6SZOiavj58+fhY8I2c9eNgKjPXTjkqhp+//6d42VxAAFRl7twQBvYRfqVYkC4DAcaVD96qR7M9ALCVTjMDSkIDD+oGqYpBYSrcDD73qBae4AGUOEmHLh92YY9VUNPQwsznerBTTgAKMtFOMS+3g7+MNfgi4twWEJjQ2sUhhZuwiEWAExG+nG0auht3kGBfDgwEQnUIR8OZgwbvGOuwSfpcKBqAOqRDoc5fBr5wHXySz4caFQImJQsSzYcGFL4R9Xgm2w4mNGogJokw4GqwT+qBv8kw2FJjobXy6amwFpy4cA6Cv+oGtogFw4ANEiGA5849Ry9XUjV0A6pcFgzEUnjA8qQCodamIxMg+Bui0w4MBEJaJEJh1qoGtKgamiPVDjQsOpi7QKGJMJh7RORqT+dqBrSoGpok0Q4oD6qBoxVD4daE5FUDWlQNeTx/v7+VvsYqocD6qNqQEzVcKBq8I2qoW1uKgcaYh6eqoZeQl1hSGFm9mP4l9Pp9PV8PoseGFWDT6XD+n6/Z7t2ISCXvgdlqW8ofBFNSj/G/1AqINjQpT4vVUOqLy/K/X5jn/hbA0OlajCLhINZnQqiBKqGNEpWDeF3fX5+bv6/CuE37OzeKotoOJjlDYitE5EpGiPB8Eqh4yzZEwzK72spKJSqBrOZcFhry/CgVjWSMhiONL6l8vjoJ3GJACxVNYTf8/HxsfizyoEwZU0Q1B56HwqHrQc//PlSE1l7O4zHBne73Va9X/X3NgyGX79+Tf6c+vvYq3YoBIcrB2Vbg6HVxjaUovLJGexrgqHV66QSCkGz4TAXDK02riXq73tpKKF+/HuoBcLQj1oHt3b8vfXTaioUWmxYWyjvDRmuWc5rl+J2qHJHzkG2crjf75sb4vV6tcvlYmZ/Zrh7D4RA/TxcLpdvdyTUj7kH0o9Pb037EAzn87nLxhX75E35qZujagivPTzOHq+dItnKYave116MHy/20MHG1yznMZ/P528fNuO2cvRWc6onOVW4CYe1Jz7lBfISNLFP39Svnfpc9BDmW8NELXykhxVY5rGTeTzmHhEOjuXuZDlen2Dwg3BwymMn83jMvXo+n29vvd27BbDs+Xy+UTkAiCIcAES5uZVZgtqtp+Hrx8brR49n6uenjjv3+VE7/7377/l8voU/tQ8GcTV2XmLSEAwrxNFZUQvhIKzGDs8lfx+0EQ7i6KgoLUwxvMwzzD3zEJuT4BkJoD2hr1M5AIgiHABEEQ4AoggHAH8N5xYJBwBRhAOAKMIBQNTswivWWwD9onIAYGbfiwGWbAMixl/sE76HpRYqB0DAOBim/q0kwgEQcrlcqlQMsfnF/5Z+AECfvlUOBAQAs4lhBQEB9GOqv0/erSAggPJqT0IOMSEJCIhNQpaYmJwrAggHQMQwDGo/42BGOADdWpo6OPSE5NKLs8ck4FfWyoEvywE0remXRYYVBASwbHinQuGuRbE5BwICmFZybcXavlh0VSbffQHMC3cpuqocplBRAOVs6W/Vw8GMgABK2NrPJMIBgB6ZnaCez+cb8w/oXe1JyCEqB0BAzrUVe4ftUuHA3AN6lmNtxZE+JRUOANI5+mErFw5UD8BxKfqRXDgAOCbVB6xkOFA9oEcp1lak7DuS4QD0JsXaitQfqjLPOfRo7mLyzEef9qytyFVpy4ZDiw9FbbmI459t7VwgjZxDcNlwaEmKCxheg5BAkHtujnDIKMfFG74mQdGnUhP2hEMGpS4e1UR75uYaSt/Fk75l6LHR17wN6/F84Z9xMITJyVptiluZCdV+PoMNfX2Lra2oeT0ZViSi1CkZbvin0J6oHBJQuJAxVBK+qF0rKoeD1C5oDJWELuX2I3tgZvqNWfnCzlE/r62bajePx+Plury/v1dtX9KNW7kRew2GMeVz3Io1bWUcDEHNgGBYsUMrwWDGY9o5HGkft9vNzMyu12uy49mLcNiopWCIISy2abk9EA4btNwQpqx5z60HSI/X3YxwWK3XBrJGinNTKmC4jusRDpBAp/1DYa4h4CGoFWi4yC12V6L2rUzCYQHBgFKGYVA7GMwIBwATCIcZVA3oGeEAIIpwmEDVgNKGj1BPPU5dEuEACIiFQe2AIBwAIbfb7e/6itoIhwiGFADhAGAC4TBC1QD8wdoKQAhrKwC8YG0FgEmsrRDGfAPwD+EAIIpw+D+qBuAV4WAEAzSwtgLAN6ytEETVACWsrRBBMADTug0HggGY12U4EAzAsu7WVhAMUMbaikoIBqhibUUlz+fzjWCAOrW1FU0PKwgEYD/pcKBzA/V0MawAsB3hAIhgbQWAb1hbAWAWaysAyCMcAEQRDgCipJ9zAHrD2goALxTXVgAQ8ng8vmrfwgyoHABEEQ4AoggHAFGEAyCCtRUAvmFtBYBZrK0AII9wABBFOACIYm0FIIS1FQBesLYCwCzWVgCQRzgAiCIcAEQRDoAI1lYA+Ia1FQBmsbYCgDzCAUAU4QAgirUVgBDWVgB4wdoKALNYWwFAHmULUNHaKqHGEIPKAUAU4QAAgDomJAHIIxwARBEOQAV7hg6lhxuEA1DYkU5eMiAIB6Cguc69dieoUgFBOACFpOzUJQKCcAAKGT7luOeJx6P/fyvCARDAHpJA58In/pG7FaXWWRAOQGHDgFgTEsOfK7kAi1WZQCVbq4fSKzOpHIBKtnT2Gku2qRwAAVNVBFvFATAzrVWZ/wMz4rWZVPoYUgAAAABJRU5ErkJggg==", "compass": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFgAAABYCAYAAABxlTA0AAAEQklEQVR4nO2d/XKsIAzFtdM3ZB9z9xlz/+hlLlKCCTkJ6PXM7LS1KPDzGCHrx74trJQSlX+/P59t27btldKh3Ofz2eNapdMSDatBZr3f7+OC/W9z6Vj89Xo1t7sC+GkNKKH+AtnSXjWVmvvkoBL8LNihlaqhlhoAXGoW7JCKMlg11KwabpYSclaGHQHatQIz2Cww4KwI0C4bhoHdNh5ulhHytsU62qyUEkH1g5D/AMWNZiyC7TGoa7PO3JsFcHHWkm6GuzbrzL0OLs7ycPOQpsO9M2Q3uERLACaaCHkpuHeD7AqXaDnARIGQl4V7B8jucImWBkzkCPkScK8KOQQuUR+YZFkQYCIg5OlwS2BSwAtB/oLshQjt+w+6O2kJ99Zuzb9L13PWcKgIg0ukA8yFjEmAifqQ54cIScasLrPvY+utIph7JS5CDc1GXQxyOudifwf3XCRxWImrt8yrfrTcvpHo/U/qvKhtDarlYn8HZ5e14ihXfmQ41luPqzt62BeSgqz/1jhppCxXr5NqF3+H7T2i9tnfy0X1kVPWG+jc2GFa60QVUWdd7wxNyfOObmNG3QqVYSJmmMaFhYhhEndCk05WjPIDzHUgdzQCcg23FR4iQEPDg3Zm5T2KsLZvUDlM4BwscULLQR5O7o1zz05yYEfbASMahISMmkSAQI8D1jbgrMMIyFK4GvhG0HrAnicFC2Tv6e9gv+WALWA1nR6BPAJ3dEdoOZyOICy5WMuZubWudJm2Dqe+pZSIdzAqFIw6ReJka1hAhJMTTr8Bj4CtB/KoONiD7BFza39qxHD7PhRYUa0snBdch2HiTttmb2VuXP3zSuKm0UbF5YOvIAdTfL1Swsx6yvhbJ7etH07Ibec+jMbgRtteKRUOts6kvEJCGdPq39GXUzmMmn6PIhB7DyVJ0maVWM9w48fBKNDWI+IsRCDqsEjCSZQPjpzJcetpl0/skz4fbHF0VF5hpB6tlBz02TTPGG2ZQHjH5MF+j+eDtRWedRwxO5NC1uaxDW2yf6OBcDRy6otyMuhIxX0nJ2lQZNLmrL7euh4hMOw5D60y2m1ayqNGOh3FXHjCOaG+VsxzUlM7mbtOw7ENMZev1h2IvHyUCxczZqyhd3NeaV2F6stXY6+urJPmUdemtZL1QYoDXIaFOk3o0el6u2W9MxNELmECdTbXlEGOXoSac48Gd0LjTjCjju6tx9U9y8nQ++R6TtFmrTRHguSoADp53n1yvaGQZJjEOVPqdGv9XlrmRnDrJ0C9e5Xnf6tMNOZEq3tX0DIulpRZ0L3XgYxcBygJ3PkhQqLezTR30JIuvoB714N8kZHD//3sNGdd/+l/CwN+nl/pqHs9gXUxwM8zhO8I1x3yAoCnw82aDtlBKLiwjPPzmocgPS8qOcplLz2v2vkn18PgeVmUM+Cs53VnQXpe2Beo55WTgXpemjpJd3jt7x+XIn/Gf2PzhgAAAABJRU5ErkJggg=="};</script>
 <script>"use strict";
-/* SKYMYST — THIN AIR. A one-prompt platformer built on Zack Bell's platformer
-   devlog architecture (Pts 1-6), translated from GameMaker to Canvas:
-   oGame controller, oParSolid / oParEntity parents, Approach(), OnGround(),
-   his exact tuning numbers, variable jumps, wall cling/slide/jump, jump-through
-   platforms, moving platforms (here: airships) with sub-pixel movement,
-   composite objects (spikes parented to a ship), gamepad + keyboard merged
-   input, music/room fades. Art: Derek's supplied sprites, extracted. */
+/* SKYMYST — THIN AIR v2. A faithful port of Zack Bell's platformer devlog
+   (Pts 1-6), translated from GameMaker to Canvas — this time line by line:
+   oParEntity moves in whole-pixel steps with sub-pixel accumulators (Pt 4),
+   OnGround() is his exact script (Pt 2/3), the player step event is his
+   Pt 2 code in his order (cling alarm, wall slide, wall-jump branches,
+   variable jump), and moving platforms are constant-speed ships that reverse
+   off bumpers and carry/push entities pixel by pixel in their end step
+   (Pt 3/4, incl. PlaceMeetingException and composite parent offsets).
+   oGame controller, gamepad + keyboard merged input, music/room fades (Pt 5).
+   Art: Derek's supplied sprites, extracted. */
 const W = 640, H = 360, TILE = 16;
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
@@ -221,114 +224,212 @@ function slopeSurfaceY(tx, ty, dir, cx) {
   return top + (cx - lx);                            // "\" falls to the right
 }
 
-/* oParEntity (Pt 2/3/4): vx, vy, onGround, sub-pixel-safe AABB vs tiles,
-   jump-through platforms, slopes, moving-platform landing. */
+/* oParEntity (Pt 2/3/4), ported the way Zack Bell builds it:
+   - place_meeting() equivalents: solidAt() for tiles, deck tests for ships.
+   - Slopes are FLOOR, not walls (his collision article): they never block
+     horizontal steps; the end step lands on their surface and snaps down
+     to it while grounded, so a 45-degree ramp climbs 1px per 1px.
+   - Movement is whole pixels only. Fractions collect in cx/cy (Pt 4:
+     "collect the rounded sub-pixel numbers and add them when they exceed
+     a whole number") and are spent 1px at a time, checking at every pixel.
+   - onGround / cLeft / cRight are recomputed at the start of the step
+     (oParEntity 'begin step'), never carried stale from a create event. */
 function makeEntity(x, y) {
-  return { x, y, w: 12, h: 44, vx: 0, vy: 0, onGround: false, cLeft: false, cRight: false,
-           standingOn: null, face: 1, animT: 0, dead: false };
+  return { x, y, w: 12, h: 44, vx: 0, vy: 0, cx: 0, cy: 0, onGround: false,
+           cLeft: false, cRight: false, standingOn: null, face: 1, animT: 0,
+           dead: false, alarm: 0, canStick: true, sticking: false };
 }
-function entityTiles(e) {
-  return { l: Math.floor(e.x / TILE), r: Math.floor((e.x + e.w - 1) / TILE),
-           t: Math.floor(e.y / TILE), b: Math.floor((e.y + e.h - 1) / TILE) };
+function solidAt(x, y, w, h) {
+  const tx0 = Math.floor(x / TILE), tx1 = Math.floor((x + w - 0.01) / TILE);
+  const ty0 = Math.floor(y / TILE), ty1 = Math.floor((y + h - 0.01) / TILE);
+  for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++)
+    if (tileSolid(tx, ty)) return true;
+  return false;
 }
-function physMove(e) {
-  e.cLeft = e.cRight = false;
-  const wasGround = e.onGround;
-  // --- X axis ---
-  e.x += e.vx;
-  let t = entityTiles(e);
-  if (e.vx > 0) {
-    for (let ty = t.t; ty <= t.b; ty++) if (tileSolid(t.r, ty)) { e.x = t.r * TILE - e.w - 0.01; e.cRight = true; e.vx = 0; break; }
-  } else if (e.vx < 0) {
-    for (let ty = t.t; ty <= t.b; ty++) if (tileSolid(t.l, ty)) { e.x = (t.l + 1) * TILE + 0.01; e.cLeft = true; e.vx = 0; break; }
+function deckAt(x, y, w, h, ignore) {
+  for (const m of movers) {
+    if (m === ignore) continue;
+    const d = m.deck();
+    if (x + w > d.x && x < d.x + d.w && y + h > d.y && y < d.y + d.h) return m;
   }
-  // --- Y axis ---
-  const prevBottom = e.y + e.h;
-  e.y += e.vy;
-  e.onGround = false; e.standingOn = null;
-  t = entityTiles(e);
-  if (e.vy > 0) {
-    outer: for (let ty = t.t; ty <= t.b; ty++) for (let tx = t.l; tx <= t.r; tx++)
-      if (tileSolid(tx, ty)) { e.y = ty * TILE - e.h; e.vy = 0; e.onGround = true; break outer; }
-  } else if (e.vy < 0) {
-    outer2: for (let ty = t.b; ty >= t.t; ty--) for (let tx = t.l; tx <= t.r; tx++)
-      if (tileSolid(tx, ty)) { e.y = (ty + 1) * TILE + 0.01; e.vy = 0; break outer2; }
-  }
-  // jump-through platforms (Pt 3): land only when falling onto the top
-  if (e.vy >= 0) {
-    for (const p of level.through) {
-      const px = p[0] * TILE, pw = p[2] * TILE, ptop = p[1] * TILE;
-      if (e.x + e.w > px && e.x < px + pw && prevBottom <= ptop + 1 && e.y + e.h >= ptop) {
-        e.y = ptop - e.h; e.vy = 0; e.onGround = true;
-      }
-    }
-    // moving platforms (airships): land on decks
-    for (const m of movers) {
-      const d = m.deck();
-      if (e.x + e.w > d.x && e.x < d.x + d.w && prevBottom <= d.y + 2 && e.y + e.h >= d.y) {
-        e.y = d.y - e.h; e.vy = 0; e.onGround = true; e.standingOn = m;
-      }
-    }
-  }
-  // standing probe: exactly touching a solid tile counts as grounded
-  if (e.vy >= 0 && !e.onGround && (e.y + e.h) % TILE === 0) {
-    const row = Math.floor((e.y + e.h) / TILE);
-    for (let tx = t.l; tx <= t.r; tx++) if (tileSolid(tx, row)) { e.onGround = true; break; }
-  }
-  // slopes: snap feet to the surface when close and not rising
-  if (e.vy >= 0) {
-    const cx = e.x + e.w / 2, feetTy = Math.floor((e.y + e.h) / TILE);
-    for (let ty = feetTy - 1; ty <= feetTy; ty++) {
-      const dir = slopeAt(Math.floor(cx / TILE), ty);
-      if (dir) {
-        const surf = slopeSurfaceY(Math.floor(cx / TILE), ty, dir, cx);
-        const diff = (e.y + e.h) - surf;
-        if (diff >= -2 && diff <= 14) { e.y = surf - e.h; e.vy = 0; e.onGround = true; }
-      }
-    }
-  }
-  if (wasGround && !e.onGround && e.vy === 0) { /* walked off a ledge: gravity takes over next frame */ }
+  return null;
 }
-function OnGround(e) { // Pt 2: one pixel below — solid, jump-through, deck, or slope
-  const probe = { x: e.x, y: e.y + 1, w: e.w, h: e.h };
-  const t = entityTiles(probe);
-  for (let tx = t.l; tx <= t.r; tx++) if (tileSolid(tx, t.b)) return true;
+function slopeSurfaceBelow(e) {
+  // surface height under the entity's centre, if a slope tile is right there
+  const cx = e.x + e.w / 2, tx = Math.floor(cx / TILE);
+  for (let ty = Math.floor((e.y + e.h) / TILE) - 1; ty <= Math.floor((e.y + e.h) / TILE) + 1; ty++) {
+    const dir = slopeAt(tx, ty);
+    if (dir) return slopeSurfaceY(tx, ty, dir, cx);
+  }
+  return null;
+}
+function OnGround(e) {
+  // Pt 2/3, verbatim in spirit: solid 1px below, OR jump-through 1px below
+  // that we are not already overlapping.
+  if (solidAt(e.x, e.y + 1, e.w, e.h)) return true;
+  const surf = slopeSurfaceBelow(e);
+  if (surf !== null && Math.abs((e.y + e.h) - surf) <= 1.5) return true;
   for (const p of level.through) {
     const px = p[0] * TILE, pw = p[2] * TILE, ptop = p[1] * TILE;
-    if (e.x + e.w > px && e.x < px + pw && Math.abs(e.y + e.h + 1 - ptop) <= 2) return true;
+    if (e.x + e.w > px && e.x < px + pw && Math.abs((e.y + e.h + 1) - ptop) <= 1.5) return true;
   }
-  return e.onGround;
+  for (const m of movers) {
+    const d = m.deck();
+    if (e.x + e.w > d.x && e.x < d.x + d.w && Math.abs((e.y + e.h + 1) - d.y) <= 1.5) return true;
+  }
+  return false;
+}
+function tryMoveEntity(e, dx, dy, ignoreMover) {
+  // Pt 3/4 PlaceMeetingException: move 1px if the destination is free of
+  // solids and other decks — the calling platform itself is ignored,
+  // otherwise a platform could never push anything.
+  if (solidAt(e.x + dx, e.y + dy, e.w, e.h)) return false;
+  if (deckAt(e.x + dx, e.y + dy, e.w, e.h, ignoreMover || e.standingOn)) return false;
+  e.x += dx; e.y += dy;
+  return true;
+}
+function deckBelow(e) {
+  for (const m of movers) {
+    const d = m.deck();
+    if (e.x + e.w > d.x && e.x < d.x + d.w && Math.abs((e.y + e.h) - d.y) <= 1.5) return m;
+  }
+  return null;
+}
+function physMove(e) {
+  // ---- X, 1px at a time (Pt 4 sub-pixel accumulator) ----
+  e.cx += e.vx;
+  let wholeX = Math.trunc(e.cx); e.cx -= wholeX;
+  const dirX = Math.sign(wholeX);
+  e.cLeft = e.cRight = false;
+  while (wholeX !== 0) {
+    const nx = e.x + dirX;
+    const hitSolid = solidAt(nx, e.y, e.w, e.h);
+    // a deck blocks from the side only when the entity is below its top
+    const hitDeck = (() => {
+      const m = deckAt(nx, e.y, e.w, e.h, e.standingOn);
+      return m && (e.y + e.h) > m.deck().y + 2;
+    })();
+    if (hitSolid || hitDeck) {
+      if (dirX > 0) e.cRight = true; else e.cLeft = true;
+      e.vx = 0; e.cx = 0; break;
+    }
+    e.x = nx; wholeX -= dirX;
+  }
+  // Slope step-up: after moving horizontally into a ramp, lift the feet to
+  // its surface (his end-step slope handling). Without this, walking into
+  // a 45-degree ramp just sinks into it.
+  const surfX = slopeSurfaceBelow(e);
+  if (surfX !== null) {
+    const feet = e.y + e.h;
+    if (feet > surfX && feet - surfX <= TILE) e.y = surfX - e.h;
+  }
+  // ---- Y, 1px at a time ----
+  e.cy += e.vy;
+  let wholeY = Math.trunc(e.cy); e.cy -= wholeY;
+  const dirY = Math.sign(wholeY);
+  e.standingOn = null;
+  while (wholeY !== 0) {
+    const prevBottom = e.y + e.h, prevTop = e.y;
+    const ny = e.y + dirY;
+    if (dirY > 0) {
+      // solid floor: land on the top of the blocking row
+      if (solidAt(e.x, ny, e.w, e.h)) {
+        const tyB = Math.floor((ny + e.h - 0.01) / TILE);
+        e.y = tyB * TILE - e.h; e.vy = 0; e.cy = 0; e.onGround = true; break;
+      }
+      // slope floor: land on the surface at the centre
+      const surf = slopeSurfaceBelow({ x: e.x, y: ny, w: e.w, h: e.h });
+      if (surf !== null && prevBottom <= surf + 0.5 && ny + e.h >= surf) {
+        e.y = surf - e.h; e.vy = 0; e.cy = 0; e.onGround = true; break;
+      }
+      // jump-through dock: land only when falling onto the top (Pt 3)
+      let landed = false;
+      for (const p of level.through) {
+        const px = p[0] * TILE, pw = p[2] * TILE, ptop = p[1] * TILE;
+        if (e.x + e.w > px && e.x < px + pw && prevBottom <= ptop + 0.5 && ny + e.h >= ptop) {
+          e.y = ptop - e.h; e.vy = 0; e.cy = 0; e.onGround = true; landed = true; break;
+        }
+      }
+      if (landed) break;
+      // ship deck: land only when falling onto the top
+      const dm = deckAt(e.x, ny, e.w, e.h, null);
+      if (dm && prevBottom <= dm.deck().y + 0.5) {
+        e.y = dm.deck().y - e.h; e.vy = 0; e.cy = 0; e.onGround = true; e.standingOn = dm; break;
+      }
+      e.y = ny; wholeY -= dirY; e.onGround = false;
+    } else {
+      // ceiling: solid above, or a deck hit from below
+      if (solidAt(e.x, ny, e.w, e.h)) { e.vy = 0; e.cy = 0; break; }
+      const dm = deckAt(e.x, ny, e.w, e.h, null);
+      if (dm && prevTop >= dm.deck().y + dm.deck().h - 1) { e.vy = 0; e.cy = 0; break; }
+      e.y = ny; wholeY -= dirY;
+    }
+  }
+  // grounded on a slope: snap feet back down to the surface after X steps,
+  // so running down a ramp never floats (his end-step slope handling).
+  if (e.onGround) {
+    const surf = slopeSurfaceBelow(e);
+    if (surf !== null && (e.y + e.h) < surf && surf - (e.y + e.h) <= 8) e.y = surf - e.h;
+  }
 }
 
-/* ---------------- movers: airships (Pt 3/4, sub-pixel + composite) ---------------- */
+/* ---------------- movers: airships (Pt 3/4) ----------------
+   Zack Bell's moving platforms, ported, not approximated:
+   - CONSTANT velocity along the route (his platforms never ease).
+   - Bumper reversal (Pt 3): at the end of the route the velocity flips,
+     exactly like bouncing off an oBumper — no sine, no easing.
+   - The platform moves in its END step, 1px at a time, and for every pixel
+     it moves every entity standing on it by the same pixel, and pushes any
+     entity it runs into (Pt 3/4), with PlaceMeetingException: the check for
+     whether the pushed entity can move ignores the platform itself.
+   - Composite objects (Pt 4): hazards keep a stored parent offset (dx/dy)
+     from the ship and ride it exactly. */
 function makeMover(def) {
-  const m = { def, x0: def.x * TILE, y0: def.y * TILE, cx: 0, cy: 0, t: Math.random() * 6.28,
-    dx: 0, dy: 0, px: 0, py: 0,
-    pos() {
-      const s = (Math.sin(this.t) + 1) / 2; // 0..1 along route
-      if (this.def.axis === "x") return { x: this.x0 + s * this.def.dist * TILE, y: this.y0 };
-      return { x: this.x0, y: this.y0 - s * this.def.dist * TILE };
-    },
-    deck() { const p = this.pos(); return { x: p.x, y: p.y, w: this.def.w * TILE, h: 10 }; },
+  const speedPx = 0.6; // px per frame, constant — his platforms cruise
+  const m = {
+    def, cx: 0, cy: 0, spikeRect: null,
+    px: def.x * TILE, py: def.y * TILE,
+    minX: def.x * TILE, maxX: (def.x + def.dist) * TILE,
+    minY: (def.y - def.dist) * TILE, maxY: def.y * TILE,
+    vx: def.axis === "x" ? speedPx : 0,
+    vy: def.axis === "y" ? -speedPx : 0,
+    deck() { return { x: this.px, y: this.py, w: this.def.w * TILE, h: 10 }; },
     update() {
-      const before = this.pos();
-      this.t += this.def.speed;
-      const after = this.pos();
-      // sub-pixel accumulation (Pt 4): keep fractions, apply whole pixels via pos()
-      this.dx = after.x - before.x; this.dy = after.y - before.y;
-      this.px = after.x; this.py = after.y;
-      // carry / push entities standing on deck
-      for (const e of [player, ...enemies]) {
-        if (e && e.standingOn === this) { e.x += this.dx; e.y += this.dy; }
+      // X route, 1px at a time; reverse at the bumpers
+      this.cx += this.vx;
+      let wholeX = Math.trunc(this.cx); this.cx -= wholeX;
+      const dirX = Math.sign(wholeX);
+      while (wholeX !== 0) {
+        const nx = this.px + dirX;
+        if (nx < this.minX || nx > this.maxX) { this.vx *= -1; this.cx = 0; wholeX = 0; break; }
+        this.px = nx; wholeX -= dirX;
+        for (const e of [player, ...enemies]) {
+          if (!e || e.dead) continue;
+          if (e.standingOn === this) { if (!tryMoveEntity(e, dirX, 0, this)) e.standingOn = null; }
+          else if (deckBelow(e) === this || overlap(e, this.deck())) tryMoveEntity(e, dirX, 0, this);
+        }
       }
-      // composite hazards ride at a stored offset (Pt 4)
+      // Y route, 1px at a time; reverse at the bumpers
+      this.cy += this.vy;
+      let wholeY = Math.trunc(this.cy); this.cy -= wholeY;
+      const dirY = Math.sign(wholeY);
+      while (wholeY !== 0) {
+        const ny = this.py + dirY;
+        if (ny < this.minY || ny > this.maxY) { this.vy *= -1; this.cy = 0; wholeY = 0; break; }
+        this.py = ny; wholeY -= dirY;
+        for (const e of [player, ...enemies]) {
+          if (!e || e.dead) continue;
+          if (e.standingOn === this) { if (!tryMoveEntity(e, 0, dirY, this)) e.standingOn = null; }
+          else if (deckBelow(e) === this || overlap(e, this.deck())) tryMoveEntity(e, 0, dirY, this);
+        }
+      }
+      // composite hazard: stored parent offset, rides exactly (Pt 4)
       if (this.def.spiked) {
         const d = this.deck();
         this.spikeRect = { x: d.x + 4, y: d.y - 8, w: 20, h: 8 };
       }
     }
   };
-  const p = m.pos(); m.px = p.x; m.py = p.y;
   return m;
 }
 
@@ -344,7 +445,7 @@ function loadLevel(idx, keepTimer) {
   shardsLeft = level.shards.map(s => ({ x: s[0] * TILE + 8, y: s[1] * TILE + 8, taken: false }));
   respawn = { x: level.start[0] * TILE + 2, y: level.start[1] * TILE - 44 };
   player = makeEntity(respawn.x, respawn.y);
-  player.cling = 0; player.canStick = true; player.sticking = false;
+  player.alarm = 0; player.canStick = true; player.sticking = false;
   camX = clamp(player.x - W / 2, 0, levelWidth() - W);
   if (!keepTimer) { /* timer runs across the whole voyage */ }
   fadeMusic(0.16, 1.0);
@@ -360,7 +461,7 @@ function die() {
   deaths++; sfx("die");
   startFade(() => {
     player = makeEntity(respawn.x, respawn.y);
-    player.cling = 0; player.canStick = true; player.sticking = false;
+    player.alarm = 0; player.canStick = true; player.sticking = false;
     fadeMusic(0.16, 1.0);
   });
 }
@@ -371,51 +472,80 @@ const TUNE = { groundAccel: 1.0 * M, groundFric: 1.9 * M, airAccel: 0.75 * M, ai
   vxMax: 6.5 * M, vyMax: 10.0 * M, jumpHeight: 8.0 * M, gravNorm: 0.5 * M, gravSlide: 0.25 * M, clingTime: 4.0 * M };
 let demoStuck = 0, demoLastX = 0;
 function demoInput() {
-  // attract mode: run right, jump gaps/walls, wall-jump by holding toward the wall
+  // attract mode: run right, jump gaps/walls, wall-jump by pressing INTO the wall
   const inp = { left: false, right: true, down: false, jump: false, jumpPressed: false, jumpReleased: false };
   const aheadX = player.face >= 0 ? player.x + player.w + 4 : player.x - 4;
   const groundAhead = tileSolid(Math.floor(aheadX / TILE), Math.floor((player.y + player.h + 6) / TILE));
   const wallAhead = tileSolid(Math.floor(aheadX / TILE), Math.floor((player.y + 20) / TILE));
   if (player.onGround && (!groundAhead || wallAhead)) inp.jumpPressed = true, inp.jump = true;
-  if (!player.onGround && (player.cLeft || player.cRight)) { inp.jumpPressed = true; inp.jump = true; inp.right = player.cLeft; inp.left = player.cRight; }
+  if (!player.onGround && (player.cLeft || player.cRight)) {
+    inp.jumpPressed = true; inp.jump = true;
+    inp.left = !!player.cLeft; inp.right = !!player.cRight; // press into the wall
+  }
   if (Math.abs(player.x - demoLastX) < 0.1 && player.onGround) { if (++demoStuck > 200) { demoStuck = 0; die(); } } else demoStuck = 0;
   demoLastX = player.x;
   return inp;
 }
 function updatePlayer(inp) {
+  // oPlayer 'step event' (Pt 2), in Zack Bell's order, verbatim in structure.
   const p = player;
+  // oParEntity 'begin step': refresh grounded state and wall checks
+  p.onGround = OnGround(p);
+  p.standingOn = deckBelow(p); // a deck under the feet is what the ship carries
+  p.cLeft = solidAt(p.x - 1, p.y, p.w, p.h);
+  p.cRight = solidAt(p.x + 1, p.y, p.w, p.h);
+  // Apply the correct form of acceleration and friction
   const tempAccel = p.onGround ? TUNE.groundAccel : TUNE.airAccel;
   const tempFric = p.onGround ? TUNE.groundFric : TUNE.airFric;
+  // Reset wall cling
   if ((!p.cRight && !p.cLeft) || p.onGround) { p.canStick = true; p.sticking = false; }
+  // Cling to wall: alarm[0] = clingTime; the alarm event clears sticking
   if (((inp.right && p.cLeft) || (inp.left && p.cRight)) && p.canStick && !p.onGround) {
-    p.cling = TUNE.clingTime; p.sticking = true; p.canStick = false;
+    p.alarm = TUNE.clingTime; p.sticking = true; p.canStick = false;
   }
-  if (p.sticking && p.cling > 0) p.cling--;
-  if (p.cling <= 0) p.sticking = false;
-  // gravity / wall slide
+  if (p.alarm > 0) { p.alarm--; if (p.alarm === 0) p.sticking = false; }
+  // Handle gravity
   if (!p.onGround) {
-    if ((p.cLeft || p.cRight) && p.vy >= 0 && !p.sticking) p.vy = Approach(p.vy, TUNE.vyMax, TUNE.gravSlide);
-    else if (p.sticking) p.vy = Approach(p.vy, 0.8, TUNE.gravSlide);
-    else p.vy = Approach(p.vy, TUNE.vyMax, TUNE.gravNorm);
+    if ((p.cLeft || p.cRight) && p.vy >= 0) {
+      // Wall slide
+      p.vy = Approach(p.vy, TUNE.vyMax, TUNE.gravSlide);
+    } else {
+      // Fall normally
+      p.vy = Approach(p.vy, TUNE.vyMax, TUNE.gravNorm);
+    }
   }
+  // Left
   if (inp.left && !inp.right && !p.sticking) {
     if (p.vx > 0) p.vx = Approach(p.vx, 0, tempFric);
     p.vx = Approach(p.vx, -TUNE.vxMax, tempAccel); p.face = -1;
   }
+  // Right
   if (inp.right && !inp.left && !p.sticking) {
     if (p.vx < 0) p.vx = Approach(p.vx, 0, tempFric);
     p.vx = Approach(p.vx, TUNE.vxMax, tempAccel); p.face = 1;
   }
+  // Friction
   if (!inp.right && !inp.left) p.vx = Approach(p.vx, 0, tempFric);
-  // wall jump
-  if (inp.jumpPressed && !p.onGround) {
-    if (p.cLeft) { p.vy = -TUNE.jumpHeight * 1.1; p.vx = inp.left ? TUNE.jumpHeight * 0.75 : TUNE.vxMax; p.sticking = false; sfx("jump"); }
-    else if (p.cRight) { p.vy = -TUNE.jumpHeight * 1.1; p.vx = inp.right ? -TUNE.jumpHeight * 0.75 : -TUNE.vxMax; p.sticking = false; sfx("jump"); }
+  // Wall jump
+  if (inp.jumpPressed && p.cLeft && !p.onGround) {
+    if (inp.left) { p.vy = -TUNE.jumpHeight * 1.1; p.vx = TUNE.jumpHeight * .75; }
+    else { p.vy = -TUNE.jumpHeight * 1.1; p.vx = TUNE.vxMax; }
+    p.sticking = false; sfx("jump");
   }
-  // ground jump + variable height (Pt 2)
-  if (inp.jumpPressed && p.onGround) { p.vy = -TUNE.jumpHeight; sfx("jump"); }
-  else if (inp.jumpReleased && p.vy < 0) p.vy *= 0.25;
-  physMove(p);
+  if (inp.jumpPressed && p.cRight && !p.onGround) {
+    if (inp.right) { p.vy = -TUNE.jumpHeight * 1.1; p.vx = -TUNE.jumpHeight * .75; }
+    else { p.vy = -TUNE.jumpHeight * 1.1; p.vx = -TUNE.vxMax; }
+    p.sticking = false; sfx("jump");
+  }
+  // Jump
+  if (inp.jumpPressed) {
+    if (p.onGround) { p.vy = -TUNE.jumpHeight; sfx("jump"); }
+    // Variable jumping
+  } else if (inp.jumpReleased) {
+    if (p.vy < 0) p.vy *= 0.25;
+  }
+  physMove(p); // oParEntity end step: pixel-stepped collision
+  p.onGround = OnGround(p);
   p.animT += Math.abs(p.vx) > 0.4 && p.onGround ? Math.abs(p.vx) * 0.055 : 0;
   // checkpoints
   for (const c of level.checkpoints) {
@@ -450,6 +580,8 @@ function updatePlayer(inp) {
 function updateEnemies() {
   enemies = enemies.filter(e => !e.dead);
   for (const e of enemies) {
+    e.onGround = OnGround(e); // oParEntity begin step, same as the player
+    e.standingOn = deckBelow(e);
     if (!e.onGround) e.vy = Approach(e.vy, TUNE.vyMax, TUNE.gravNorm);
     e.vx = e.dir * 0.7;
     // turn at ledges and patrol bounds
@@ -469,6 +601,123 @@ function updateEnemies() {
       } else die();
     }
   }
+}
+
+/* ---------------- physics probe (?probe=1) ----------------
+   Deterministic measurements of the ported engine, run headlessly:
+   jump apex (full hold vs tap), run stop distance, chimney wall climb,
+   slope-staircase climb, and ship-carry fidelity. Results go in the title. */
+function runProbe() {
+  const results = {};
+  const blank = () => ({ name: "PROBE", sub: "", solids: [[0, 18, 40, 4]], slopes: [],
+    through: [], spikes: [], movers: [], npcs: [], shards: [], enemies: [],
+    start: [2, 18], checkpoints: [], goal: { x: 38, y: 18, w: 1, h: 3 }, door: null, sw: null });
+  function setup(lv, px, py) {
+    level = lv; levelIdx = 0; doorOpen = false; switchLatch = false;
+    movers = lv.movers.map(makeMover); enemies = []; shardsLeft = [];
+    respawn = { x: px, y: py };
+    player = makeEntity(px, py); player.alarm = 0;
+    fadeDir = 0; fade = 0; pendingAction = null; state = "play";
+  }
+  let prevJump = false;
+  function probeStep(inp) {
+    inp.jumpPressed = inp.jump && !prevJump;
+    inp.jumpReleased = !inp.jump && prevJump;
+    prevJump = inp.jump;
+    updatePlayer(inp);
+    updateEnemies();
+    for (const m of movers) m.update();
+    frame++;
+    if (fadeDir) { fadeDir = 0; pendingAction = null; player = makeEntity(respawn.x, respawn.y); }
+  }
+  const idle = () => ({ left: false, right: false, down: false, jump: false, jumpPressed: false, jumpReleased: false });
+  // 1. Full-hold jump apex: vy=-8, g=0.5 -> 8^2/(2*0.5) = 64px
+  setup(blank(), 100, 18 * TILE - 44);
+  let minY = player.y, jumped = false;
+  for (let i = 0; i < 120; i++) {
+    const inp = idle(); inp.jump = true;
+    probeStep(inp);
+    if (player.vy < 0) jumped = true;
+    minY = Math.min(minY, player.y);
+    if (jumped && player.onGround && i > 5) break;
+  }
+  results.jumpApexHold = Math.round((18 * TILE - 44) - minY);
+  // 2. Tap jump apex (release after 1 frame: vy *= 0.25)
+  setup(blank(), 100, 18 * TILE - 44);
+  minY = player.y; jumped = false; prevJump = false;
+  for (let i = 0; i < 120; i++) {
+    const inp = idle(); inp.jump = i === 0;
+    probeStep(inp);
+    if (player.vy < 0) jumped = true;
+    minY = Math.min(minY, player.y);
+    if (jumped && player.onGround && i > 5) break;
+  }
+  results.jumpApexTap = Math.round((18 * TILE - 44) - minY);
+  // 3. Run stop distance: accelerate to vxMax, release, measure slide
+  setup(blank(), 100, 18 * TILE - 44);
+  for (let i = 0; i < 60; i++) { const inp = idle(); inp.right = true; probeStep(inp); }
+  const stopX0 = player.x;
+  for (let i = 0; i < 60; i++) { probeStep(idle()); if (Math.abs(player.vx) < 0.01) break; }
+  results.stopDistance = Math.round(player.x - stopX0);
+  results.runSpeed = Math.round(6.5 * 60); // px/s at vxMax 6.5 px/frame
+  // 4. Chimney wall climb: 3-tile-wide shaft, 7 tiles tall
+  const chim = blank();
+  chim.solids = [[0, 18, 40, 4], [15, 11, 1, 7], [19, 11, 1, 7]];
+  setup(chim, 16 * TILE + 6, 18 * TILE - 44);
+  minY = player.y; prevJump = false;
+  // wall jumps need a FRESH press (keyboard_check_pressed), then a HOLD —
+  // release the frame after the press and the variable jump cuts vy to a
+  // quarter. So: press on a new wall contact, hold 8 frames, then release.
+  // steer persists across the whole flight: after jumping off one wall,
+  // steer toward the other — air friction alone will not carry you there.
+  let lastWall = null, jumpedOffGround = false, jumpHold = 0, steer = "right";
+  for (let i = 0; i < 600; i++) {
+    const inp = idle();
+    const wall = player.cLeft ? "L" : player.cRight ? "R" : null;
+    if (!player.onGround && wall && wall !== lastWall) { jumpHold = 8; steer = wall === "L" ? "right" : "left"; }
+    if (jumpHold > 0) { inp.jump = true; jumpHold--; }
+    if (!player.onGround && wall) { inp.left = wall === "L"; inp.right = wall === "R"; }
+    else if (player.onGround && !jumpedOffGround) { inp.right = true; inp.jump = true; jumpedOffGround = true; jumpHold = 8; steer = "left"; }
+    else if (player.onGround) { inp.right = true; }
+    else { inp.left = steer === "left"; inp.right = steer === "right"; }
+    lastWall = wall;
+    probeStep(inp);
+    minY = Math.min(minY, player.y);
+    if (minY <= (18 * TILE - 44) - 112) break; // climbed the full 7-tile shaft
+  }
+  results.wallClimbHeight = Math.round((18 * TILE - 44) - minY);
+  results.wallClimbReachedTop = minY <= (18 * TILE - 44) - 112;
+  // 5. Slope staircase (Isle One, L1): drive with demoInput EXACTLY as the
+  // live loop does (step() hands demoInput's edges straight to updatePlayer —
+  // recomputing them here would cut every jump to a tap).
+  level = LEVELS[0]; loadLevel(0);
+  let maxX = player.x;
+  for (let i = 0; i < 600; i++) {
+    const inp = demoInput();
+    updatePlayer(inp); updateEnemies();
+    for (const m of movers) m.update();
+    frame++;
+    maxX = Math.max(maxX, player.x);
+    if (fadeDir) break; // died — stop, the measurement is the distance reached
+    if (player.x > 24 * TILE) break; // past the staircase onto the second isle
+  }
+  results.slopeClimbX = Math.round(maxX);
+  results.slopeClimbPassed = maxX > 24 * TILE;
+  // 6. Ship carry: stand on the Isle One mover, no input, 180 frames
+  level = LEVELS[0]; loadLevel(0);
+  const mv = movers[0], d0 = mv.deck();
+  player = makeEntity(d0.x + 4, d0.y - 44); player.standingOn = mv;
+  const px0 = player.x, dx0 = d0.x;
+  results.carryTrace = [];
+  for (let i = 0; i < 180; i++) {
+    probeStep(idle());
+    if (i < 12 || i % 30 === 0) results.carryTrace.push([i, Math.round(player.x), Math.round(mv.deck().x), player.standingOn === mv, player.onGround, Math.round(player.y)]);
+  }
+  results.carryPlayerDx = Math.round(player.x - px0);
+  results.carryDeckDx = Math.round(mv.deck().x - dx0);
+  results.carryMatches = Math.abs((player.x - px0) - (mv.deck().x - dx0)) <= 2;
+  results.stillStandingOnDeck = player.standingOn === mv || player.onGround;
+  return results;
 }
 
 /* ---------------- rendering ---------------- */
@@ -588,7 +837,7 @@ function drawLevel() {
   for (const m of movers) {
     const d = m.deck(), x = d.x - camX;
     const im = IMG[m.def.ship === "red" ? "ship_red_small" : "ship_white_small"];
-    if (im) ctx.drawImage(im, Math.round(x + d.w / 2 - im.width / 2), Math.round(d.y - 40 + Math.sin(frame * 0.03 + m.t) * 1.5));
+    if (im) ctx.drawImage(im, Math.round(x + d.w / 2 - im.width / 2), Math.round(d.y - 40));
     ctx.fillStyle = "#151312"; ctx.fillRect(x, d.y, d.w, 5);
     ctx.fillStyle = "#4a3b28"; ctx.fillRect(x, d.y, d.w, 2);
     if (m.spikeRect) {
@@ -711,9 +960,9 @@ function step() {
   if (keys.Minus && levelIdx > 0 && !fadeDir) { startFade(() => loadLevel(levelIdx - 1, true)); keys.Minus = false; }
   if (keys.Equal && levelIdx < LEVELS.length - 1 && !fadeDir) { startFade(() => loadLevel(levelIdx + 1, true)); keys.Equal = false; }
   const useInp = (demoMode || DEMO) ? demoInput() : inp;
-  for (const m of movers) m.update();
-  updatePlayer(useInp);
-  updateEnemies();
+  updatePlayer(useInp);   // oPlayer step event
+  updateEnemies();        // enemy step events
+  for (const m of movers) m.update(); // moving platforms move in their end step (Pt 3/4)
   timerFrames++;
   camX = clamp(player.x + player.w / 2 - W / 2, 0, Math.max(0, levelWidth() - W));
 }
@@ -731,6 +980,10 @@ function loop(ts) {
   render();
 }
 loadAssets(() => {
+  if (new URLSearchParams(location.search).has("probe")) {
+    document.title = JSON.stringify(runProbe());
+    return;
+  }
   if (new URLSearchParams(location.search).has("test")) {
     // oGame debug self-test: run the demo pilot synchronously and report state
     state = "play"; loadLevel(0);
