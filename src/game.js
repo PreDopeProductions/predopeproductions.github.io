@@ -1,989 +1,1080 @@
 "use strict";
-/* SKYMYST — THIN AIR v2. A faithful port of Zack Bell's platformer devlog
-   (Pts 1-6), translated from GameMaker to Canvas — this time line by line:
-   oParEntity moves in whole-pixel steps with sub-pixel accumulators (Pt 4),
-   OnGround() is his exact script (Pt 2/3), the player step event is his
-   Pt 2 code in his order (cling alarm, wall slide, wall-jump branches,
-   variable jump), and moving platforms are constant-speed ships that reverse
-   off bumpers and carry/push entities pixel by pixel in their end step
-   (Pt 3/4, incl. PlaceMeetingException and composite parent offsets).
-   oGame controller, gamepad + keyboard merged input, music/room fades (Pt 5).
-   Art: Derek's supplied sprites, extracted. */
-const W = 640, H = 360, TILE = 16;
-const canvas = document.getElementById("game");
-const ctx = canvas.getContext("2d");
-ctx.imageSmoothingEnabled = false;
+/* SKYMYST — Original World.
+   A port + expansion of Derek Boe's GameMaker 8.0 prototype (decompiled from
+   SkyDemo.exe). Object behaviours are translated from the extracted .gml event
+   files in original/skydemo_src/objects/. Room layouts, tiles and instances
+   come from the extracted room.json data (see world.js, built by gen_world.py).
+   Movement uses the original's own pixel-stepping (repeat(spd) 1px steps),
+   which is also the v2 engine's quality bar. Room speed 30, view 640x480. */
+const cv = document.getElementById("game"), ctx = cv.getContext("2d");
+ctx.imageSmoothingEnabled = false; // 1:1 pixel art: never smooth a scaled sprite
+const VW = 640, VH = 480;
+const Q = new URLSearchParams(location.search);
+const TEST = Q.has("test"), SHOT = Q.get("shot");
 
-/* ---------------- assets (inlined by build.py as data URLs) ---------------- */
-const IMG = {};
-function loadAssets(done) {
-  // Never gate the game on images: if any sprite hangs or is blocked, start
-  // anyway after a short timeout — drawing code already skips missing images.
-  let fired = false;
-  const fire = () => { if (!fired) { fired = true; done(); } };
-  setTimeout(fire, 1200);
-  const names = Object.keys(ASSETS);
-  let left = names.length;
-  if (!left) return fire();
-  names.forEach(n => {
-    const im = new Image();
-    im.onload = () => { IMG[n] = im; if (--left === 0) fire(); };
-    im.onerror = () => { IMG[n] = null; if (--left === 0) fire(); };
-    im.src = ASSETS[n];
-  });
+/* ---------- assets ---------- */
+const IMG = {};   // sprite name -> [Image frames]
+const BGIMG = {}; // background name -> Image
+function loadAssets() {
+  for (const k in ASSETS) {
+    const img = new Image(); img.src = ASSETS[k];
+    if (k.startsWith("spr:")) {
+      const base = k.slice(4), m = base.match(/^(.*)_(\d+)$/);
+      if (m) (IMG[m[1]] = IMG[m[1]] || [])[+m[2]] = img;
+    } else if (k.startsWith("bg:")) BGIMG[k.slice(3)] = img;
+  }
+}
+const SPR = n => WORLD.sprites[n];
+function sprImg(name, idx) {
+  const f = IMG[name]; if (!f || !f.length) return null;
+  return f[Math.abs(Math.floor(idx)) % f.length];
 }
 
-/* ---------------- helpers (Pt 2) ---------------- */
-function Approach(v, target, shift) {
-  return v < target ? Math.min(v + shift, target) : Math.max(v - shift, target);
+/* ---------- items (scripts/scr_items.gml, verbatim data) ---------- */
+const ITEMS = { name: [""], type: [""], info: [""], atk: [0], def: [0], hp: [0] };
+function defItem(id, name, type, info, extra) {
+  ITEMS.name[id] = name; ITEMS.type[id] = type; ITEMS.info[id] = info;
+  if (extra) { if (extra.atk) ITEMS.atk[id] = extra.atk; if (extra.def) ITEMS.def[id] = extra.def; if (extra.hp) ITEMS.hp[id] = extra.hp; }
 }
-function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
-function overlap(a, b) { return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y; }
+defItem(1, "Dubloons", "stackable", "Currency within the Myst");
+defItem(2, "Flowers", "stackable", "A pretty flower");
+defItem(3, "Potion", "consumable", "A potion used for healing", { hp: 10 });
+defItem(4, "Meat", "consumable", "Delicious", { hp: 5 });
+defItem(5, "Cannon", "weapon", "Shoots a volley bullet", { atk: 10 });
+defItem(6, "Bomb", "weapon", "A fuze lit bomb with shrapnel", { atk: 20 });
+defItem(11, "Double Cannon", "weapon", "Shoots two volley bullets", { atk: 15 });
+defItem(12, "Tail Cannon", "weapon", "Shoots backwards", { atk: 12 });
+defItem(7, "Metal Shield", "shield", "This should do me good in battle", { def: 25 });
+defItem(8, "Wood Shield", "shield", "Weak and flimsy", { def: 8 });
+defItem(13, "Dubloon Magnet", "shield", "Pulls in stray dubloon pieces", { def: 4 });
+defItem(9, "Coal", "stackable", "A combustible black sedimentary rock");
+defItem(10, "Skull", "stackable", "A human skull");
+/* EXPANSION items — defined exactly the way scr_items.gml defines the originals.
+   Icons are spr_inventory_obj frames 14/15, drawn at native 32x32 in the
+   original palette (expansion_assets/, see style_check.py). */
+defItem(14, "Skybloom", "stackable", "A heavy bloom from the Thick Air garden isle");
+defItem(15, "Salvage", "stackable", "Sky-metal torn from a derelict wreck");
 
-/* ---------------- input (Pt 5: keyboard + gamepad merged) ---------------- */
-const keys = {};
-let jumpHeldPrev = false;
-addEventListener("keydown", e => {
-  if (["ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Space"].includes(e.code)) e.preventDefault();
-  keys[e.code] = true; initAudio();
-});
+/* ---------- globals (obj_control/create_0.gml) ---------- */
+const G = {
+  shipnum: 2, trade: false, traded: 0, tradestock: 0, canTrade: 0, tradeItem: 0, mapMarked: false,
+  crew: 1, max_crew: 10, invW: 6, invH: 2,
+  max_hp: 100, hp: 100, base_attack: 20, base_defense: 20, atk: 20, def: 20,
+  equip: [0, 0], inventory: [], stack: [],
+  invShow: false, equipShow: false, menuShow: false, menu: [], menuX: 0, menuY: 0,
+  menuSelH: 0, menuSelV: 0, mouseSelObj: 0, mouseSelAmt: 0, mouseSelPH: 0, mouseSelPV: 0,
+};
+for (let k = 0; k < G.invH; k++) { G.inventory.push(new Array(G.invW).fill(0)); G.stack.push(new Array(G.invW).fill(0)); }
+/* scripts/item_add.gml */
+function item_add(id, amt) {
+  let found = 0, count = amt;
+  if (ITEMS.type[id] === "stackable") {
+    for (let i = 0; i < G.invH && !found; i++) for (let j = 0; j < G.invW; j++)
+      if (G.inventory[i][j] === id) { G.stack[i][j] += amt; found = 1; break; }
+    if (!found) for (let i = 0; i < G.invH && !found; i++) for (let j = 0; j < G.invW; j++)
+      if (G.inventory[i][j] === 0) { G.inventory[i][j] = id; G.stack[i][j] = amt; found = 1; break; }
+  } else for (let i = 0; i < G.invH; i++) for (let j = 0; j < G.invW; j++)
+    if (G.inventory[i][j] === 0 && count > 0) { G.inventory[i][j] = id; G.stack[i][j] = 1; count--; }
+}
+function item_remove(id, amt) { /* scripts/item_remove.gml */
+  let count = amt;
+  if (ITEMS.type[id] === "stackable") {
+    for (let i = 0; i < G.invH; i++) for (let j = 0; j < G.invW; j++)
+      if (G.inventory[i][j] === id) {
+        if (G.stack[i][j] > count) G.stack[i][j] -= count;
+        else { G.inventory[i][j] = 0; G.stack[i][j] = 0; }
+      }
+  } else for (let i = 0; i < G.invH; i++) for (let j = 0; j < G.invW; j++)
+    if (G.inventory[i][j] === id && count > 0) { G.inventory[i][j] = 0; G.stack[i][j] = 0; count--; }
+}
+function item_amount(id) { /* scripts/item_amount.gml */
+  let count = 0;
+  if (ITEMS.type[id] === "stackable") {
+    for (let i = 0; i < G.invH; i++) for (let j = 0; j < G.invW; j++)
+      if (G.inventory[i][j] === id) count = G.stack[i][j];
+  } else for (let i = 0; i < G.invH; i++) for (let j = 0; j < G.invW; j++)
+    if (G.inventory[i][j] === id) count++;
+  return count;
+}
+function item_clear(id) { for (let i = 0; i < G.invH; i++) for (let j = 0; j < G.invW; j++) if (G.inventory[i][j] === id) G.stack[i][j] = 0; }
+function inventory_space() { let c = 0; for (let k = 0; k < G.invH; k++) for (let i = 0; i < G.invW; i++) if (!G.inventory[k][i]) c++; return c; }
+function inventory_clear() { for (let k = 0; k < G.invH; k++) for (let i = 0; i < G.invW; i++) G.stack[k][i] = 0; }
+item_add(5, 1); // obj_control create: item_add(5,1) — a Cannon to start
+
+/* ---------- messages (show_message) ---------- */
+let toast = "", toastT = 0;
+function showMessage(s) { toast = s; toastT = 150; }
+
+/* ---------- air bands (EXPANSION: Derek's skymap — Thick / Stable / Thin) ---------- */
+const ROOM_ALT = { rmTravel: null, rmExplore: 0.50, rmExplore2: 0.45, rmExplore3: 0.18, rmExplore4: 0.82, rm_test: 0.50, rmGarden: 0.15, rmDerelict: 0.85 };
+function altitudeAt(roomName, y) {
+  const r = WORLD.rooms[roomName];
+  if (ROOM_ALT[roomName] === null || ROOM_ALT[roomName] === undefined) return 1 - y / r.h; // rmTravel spans all bands
+  return ROOM_ALT[roomName] + (0.5 - y / r.h) * 0.25;
+}
+function bandAt(roomName, y) {
+  const a = altitudeAt(roomName, y);
+  if (a >= 0.66) return { name: "THIN AIR", alt: a, grav: 1.4, airSpd: 3, jump: -12.5, projGrav: 0.7, sink: 0.5 };
+  if (a <= 0.33) return { name: "THICK AIR", alt: a, grav: 0.5, airSpd: 5, jump: -10, projGrav: 0.3, sink: -0.3 };
+  return { name: "STABLE ATMOSPHERE", alt: a, grav: 1.0, airSpd: 5, jump: -11, projGrav: 0.5, sink: 0 };
+}
+
+/* ---------- world / entities ---------- */
+let roomName = "rmTravel", ents = [], cam = { x: 0, y: 0 }, mode = "ship"; // mode: ship | foot
+let player = null, vessel = null, frame = 0, started = false, gameOver = false;
+let travelSave = null, lastCombatFrame = -9999, raidTimer = 45 * 30, walkVariant = 0;
+const solidHash = new Map(); // "cx,cy" -> true for block instances (per current room)
+function cellKey(x, y) { return (x >> 5) + "," + (y >> 5); }
+function rebuildSolids() {
+  solidHash.clear();
+  for (const e of ents) if (e.type === "objBlock16" || e.type === "objBlock32") {
+    const s = e.type === "objBlock16" ? 16 : 32;
+    for (let x = e.x; x < e.x + s; x += 16) for (let y = e.y; y < e.y + s; y += 16) solidHash.set(cellKey(x, y), true);
+  }
+}
+function bbox(e) {
+  const m = SPR(e.spr); if (!m) return { l: e.x - 8, t: e.y - 8, r: e.x + 8, b: e.y + 8 };
+  const xs = e.xscale || 1;
+  let l, r;
+  if (xs >= 0) { l = e.x + m.left - m.ox; r = e.x + m.right - m.ox; }
+  else { l = e.x - (m.right - m.ox); r = e.x - (m.left - m.ox); }
+  return { l, t: e.y + m.top - m.oy, r, b: e.y + m.bottom - m.oy };
+}
+function overlap(a, b) { return a.l <= b.r && b.l <= a.r && a.t <= b.b && b.t <= a.b; }
+function placeMeeting(e, dx, dy, types) {
+  const save = { x: e.x, y: e.y }; e.x += dx; e.y += dy;
+  const bb = bbox(e); let hit = null;
+  for (const o of ents) { if (o !== e && !o.dead && types.includes(o.type) && overlap(bb, bbox(o))) { hit = o; break; } }
+  e.x = save.x; e.y = save.y; return hit;
+}
+function solidMeeting(e, dx, dy) { // blocks only, via hash (player/ship collision parent)
+  const save = { x: e.x, y: e.y }; e.x += dx; e.y += dy;
+  const bb = bbox(e); let hit = false;
+  for (let cx = Math.floor(bb.l / 32) * 32; cx <= bb.r && !hit; cx += 32)
+    for (let cy = Math.floor(bb.t / 32) * 32; cy <= bb.b && !hit; cy += 32)
+      if (solidHash.has(cellKey(cx, cy))) {
+        // refine: test actual block rects in this cell neighbourhood
+        for (const o of ents) if (!o.dead && (o.type === "objBlock16" || o.type === "objBlock32")) {
+          const s = o.type === "objBlock16" ? 16 : 32;
+          if (bb.l < o.x + s && bb.r > o.x && bb.t < o.y + s && bb.b > o.y) { hit = true; break; }
+        }
+      }
+  e.x = save.x; e.y = save.y; return hit;
+}
+function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+function nearest(x, y, types, excl) {
+  let best = null, bd = 1e18;
+  for (const o of ents) if (!o.dead && o !== excl && types.includes(o.type)) { const d = (o.x - x) ** 2 + (o.y - y) ** 2; if (d < bd) { bd = d; best = o; } }
+  return best;
+}
+function anyOf(types) { return ents.some(e => !e.dead && types.includes(e.type)); }
+const ENEMY_TYPES = ["objEnemyBomber", "objSmlBoat"];
+const isEnemy = e => ENEMY_TYPES.includes(e.type);
+
+function create(type, x, y, props) {
+  const meta = WORLD.objects[type] || {};
+  const e = { type, x, y, spr: meta.spr || null, depth: meta.depth || 0, visible: meta.visible !== false, img: 0, imgSpd: 1,
+    xscale: 1, yscale: 1, angle: 0, alpha: 1, vx: 0, vy: 0, dir: 1, dead: false, t: 0 };
+  Object.assign(e, makeState(type));
+  if (props) Object.assign(e, props);
+  ents.push(e); return e;
+}
+function destroy(e) { if (!e || e.dead) return; e.dead = true; onDestroy(e); }
+
+/* ---------- per-object create events (translated from create_0.gml) ---------- */
+function makeState(type) {
+  switch (type) {
+    case "objPlayer": return { vspd: 0, grav: 1, spd: 5, isMoving: false, isInAir: false, takeOff: 0, pickUp: false, pickAlarm: -1, frac: 0 };
+    case "objShip": return { SPEED: 3, canShoot: 1, crewShoot: true, shootCd: 0, crewCd: 0, repair: 0, kind: "ship" };
+    case "objShip1": return { SPEED: 4, canShoot: 1, crewShoot: true, shootCd: 0, crewCd: 0, repair: 0, kind: "ship1" };
+    case "objRowBoat": return { SPEED: 2, canShoot: 0, shootCd: 0, crewShoot: false, crewCd: 0, repair: 0, kind: "rowboat", hp: 5 };
+    case "objEnemyBomber": return { hp: 100, crew: 1 + irnd(10), goldN: 5 + irnd(4), spd: 3, ang: rnd(360), canShoot: true, crewShoot: true, shootCd: 30, crewCd: 30, flockCd: 10 };
+    case "objSmlBoat": return { hp: 20, spd: 4, ang: irnd(360), crew: 2 + irnd(2), canShoot: true, crewShoot: true, shootCd: 30, crewCd: 30, flockCd: 10 };
+    case "objBomb": case "objEBomb": return { fuse: 50, dir: type === "objEBomb" ? (Math.random() < 0.5 ? 1 : -1) : 1 };
+    case "objGold": return { life: 500 };
+    case "objDebris": return { life: 50, spin: Math.random() < 0.5 ? 1 : 2, img: irnd(5) };
+    case "objShrapnel": return { life: 50 };
+    case "objCrew": return { life: 50, spin: Math.random() < 0.5 ? 1 : 2 };
+    case "objBlast": case "objSMLBlast": case "objESmlBlast": return { life: type === "objBlast" ? 3 : 4 };
+    case "objSkull": case "objskullTake": case "objFlowerPatch": case "objSkybloomPatch": case "objSalvage": return { stock: 1 };
+    case "objWreck": return { img: 3, imgSpd: 0 }; // the derelict: sprShipDmg's worst quartile, static
+    case "objCrate": return { vy: 0 };
+    default:
+      if (NPC_TYPES.includes(type)) return { t: 0, done: false };
+      return {};
+  }
+}
+const NPC_TYPES = ["obj_speech1", "object10", "obj_mayor", "obj_mayorTrade", "object55", "obj_speechTrade", "obj_sacrifice", "obj_crewInfo", "obj_flowers", "obj_harbormaster", "obj_gardener"];
+const TRADE_NPCS = ["obj_mayorTrade", "object55", "obj_speechTrade"];
+function rnd(a) { return Math.random() * a; }
+function irnd(a) { return Math.floor(Math.random() * a); }
+function choose(...a) { return a[Math.floor(Math.random() * a.length)]; }
+
+/* ---------- room loading (room.json: tiles + instances, verbatim) ---------- */
+let tileCanvas = null;
+function loadRoom(name, keepTravel) {
+  if (roomName === "rmTravel" && name !== "rmTravel" && !keepTravel) {
+    travelSave = ents.filter(e => !e.dead && !["objBullet", "objBullet2", "objRearBullet", "objCrewBullet", "objEBullet", "objECrewBullet", "objBomb", "objEBomb", "objBlast", "objSMLBlast", "objESmlBlast", "objDebris", "objShrapnel", "objCrew"].includes(e.type));
+  }
+  roomName = name; ents = []; player = null; vessel = null;
+  const R = WORLD.rooms[name];
+  if (name === "rmTravel" && travelSave) {
+    ents = travelSave; travelSave = null;
+    vessel = ents.find(e => e.type === "objShip" || e.type === "objShip1" || e.type === "objRowBoat") || null;
+  } else {
+    for (const [obj, x, y, code] of R.insts) {
+      if (obj === "obj_control") continue; // obj_control is persistent (depth -4, persistent:true)
+      const e = create(obj, x, y);
+      if (code && code.includes("dir=-1")) e.dir = -1; // rmExplore2 player creation code
+      if (obj === "objPlayer") player = e;
+      if (obj === "objShip" || obj === "objShip1" || obj === "objRowBoat") vessel = e;
+    }
+    if (name === "rmTravel") { // objShip/create_0.gml globals
+      G.hp = 100; G.max_hp = 100; G.max_crew = 9; G.shipnum = 2; if (G.crew < 1) G.crew = 1;
+    }
+  }
+  rebuildSolids();
+  // Pre-render tile layer (depth-sorted: higher depth drawn first = behind)
+  tileCanvas = document.createElement("canvas"); tileCanvas.width = R.w; tileCanvas.height = R.h;
+  const tc = tileCanvas.getContext("2d");
+  const tiles = [...R.tiles].sort((a, b) => b[7] - a[7]);
+  for (const [x, y, bg, tx, ty, w, h] of tiles) {
+    const img = BGIMG[bg]; if (img && img.complete && img.naturalWidth) tc.drawImage(img, tx, ty, w, h, x, y, w, h);
+  }
+  focusCamera(true);
+}
+function gotoRoom(name) { loadRoom(name); mode = (name === "rmTravel" || name === "rm_test") ? (name === "rmTravel" ? "ship" : "foot") : "foot"; if (name === "rm_test") mode = "foot"; }
+
+/* ---------- destroy events ---------- */
+function burst(e, type, n, props) { for (let i = 0; i < n; i++) { const p = create(type, e.x, e.y, props); p.vx = Math.cos(rnd(Math.PI * 2)) * rnd(type === "objGold" ? 3 : 9); p.vy = Math.sin(rnd(Math.PI * 2)) * rnd(type === "objGold" ? 3 : 9) - (type === "objDebris" ? 2 : 0); } }
+function onDestroy(e) {
+  switch (e.type) {
+    case "objShip": case "objShip1": // objShip/destroy_0.gml
+      burst(e, "objShrapnel", 10); burst(e, "objDebris", 25);
+      for (let i = 0; i < G.crew; i++) burst(e, "objCrew", 1);
+      create("objRowBoat", e.x, e.y); G.shipnum = 0; G.hp = 10; G.max_hp = 10; G.max_crew = 1; G.crew = 1;
+      vessel = ents[ents.length - 1]; showMessage("Ship lost! The crew escapes in the rowboat."); break;
+    case "objRowBoat": // objRowBoat/destroy_0.gml: rebuild the ship you can afford
+      if (G.shipnum === 1) { vessel = create("objShip1", e.x, e.y); G.hp = 20; G.max_hp = 20; G.max_crew = 3; }
+      else if (G.shipnum === 2) { vessel = create("objShip", e.x, e.y); G.hp = 100; G.max_hp = 100; G.max_crew = 9; }
+      else if (vessel === e) { gameOver = true; }
+      break;
+    case "objEnemyBomber": burst(e, "objGold", e.goldN); burst(e, "objShrapnel", 5); burst(e, "objDebris", 15); break;
+    case "objSmlBoat": burst(e, "objGold", 1 + irnd(5)); burst(e, "objShrapnel", 5); burst(e, "objDebris", 15); break;
+    case "objBomb": case "objEBomb": create("objSMLBlast", e.x, e.y); break;
+    case "objBullet": case "objBullet2": case "objRearBullet": case "objCrewBullet": case "objEBullet": case "objECrewBullet":
+      create("objBlast", e.x, e.y); break;
+  }
+}
+
+/* ---------- input ---------- */
+const keys = {}, pressed = {};
+let mouseX = 0, mouseY = 0, clicks = [], rclicks = [];
+addEventListener("keydown", e => { if (!keys[e.code]) pressed[e.code] = true; keys[e.code] = true; if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space"].includes(e.code)) e.preventDefault(); if (!started) { started = true; } });
 addEventListener("keyup", e => { keys[e.code] = false; });
-/* touch / click: click starts the game; on touch devices the bottom of the
-   screen is left | right | (gap) | jump, so it plays without a keyboard. */
-const touch = { left: false, right: false, jump: false };
-function canvasPos(e) {
-  const r = canvas.getBoundingClientRect();
-  return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H };
-}
-function applyPointers(e) {
-  const p = canvasPos(e);
-  touch.left = touch.right = touch.jump = false;
-  if (p.y > H - 64) {
-    if (p.x < 128) touch.left = true;
-    else if (p.x < 264) touch.right = true;
-    else if (p.x > W - 158) touch.jump = true;
-  }
-  initAudio();
-  if (state === "title") { state = "play"; timerFrames = 0; deaths = 0; totalShards = 0; loadLevel(0); }
-  else if (state === "win") state = "title";
-}
-canvas.addEventListener("pointerdown", applyPointers);
-canvas.addEventListener("pointermove", e => { if (e.buttons) applyPointers(e); });
-addEventListener("pointerup", () => { touch.left = touch.right = touch.jump = false; });
-function readInput() {
-  let left = keys.ArrowLeft || keys.KeyA || touch.left, right = keys.ArrowRight || keys.KeyD || touch.right;
-  let down = keys.ArrowDown || keys.KeyS, jump = keys.KeyZ || keys.Space || keys.ArrowUp || keys.KeyW || touch.jump;
-  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-  for (const gp of pads) {
-    if (!gp) continue;
-    const ax = gp.axes[0] || 0, ay = gp.axes[1] || 0;
-    if (ax < -0.3) left = true; if (ax > 0.3) right = true; if (ay > 0.3) down = true;
-    if (gp.buttons[0] && gp.buttons[0].pressed) jump = true;
-    if (gp.buttons[14] && gp.buttons[14].pressed) left = true;
-    if (gp.buttons[15] && gp.buttons[15].pressed) right = true;
-  }
-  const pressed = !!jump && !jumpHeldPrev, released = !jump && jumpHeldPrev;
-  jumpHeldPrev = !!jump;
-  return { left: !!left, right: !!right, down: !!down, jump: !!jump, jumpPressed: pressed, jumpReleased: released };
-}
+function canvasPos(ev) { const r = cv.getBoundingClientRect(); return { x: (ev.clientX - r.left) * VW / r.width, y: (ev.clientY - r.top) * VH / r.height }; }
+cv.addEventListener("mousemove", e => { const p = canvasPos(e); mouseX = p.x; mouseY = p.y; });
+cv.addEventListener("mousedown", e => { started = true; const p = canvasPos(e); (e.button === 2 ? rclicks : clicks).push({ sx: p.x, sy: p.y, wx: p.x + cam.x, wy: p.y + cam.y }); });
+cv.addEventListener("contextmenu", e => e.preventDefault());
+const K = {
+  left: () => keys.KeyA || keys.ArrowLeft, right: () => keys.KeyD || keys.ArrowRight,
+  up: () => keys.KeyW || keys.ArrowUp, down: () => keys.KeyS || keys.ArrowDown,
+  jumpP: () => pressed.ControlLeft || pressed.ControlRight || pressed.Space,
+  fire: () => keys.ControlLeft || keys.ControlRight,
+  sP: () => pressed.KeyS || pressed.ArrowDown, wP: () => pressed.KeyW || pressed.ArrowUp,
+};
 
-/* ---------------- audio (Pt 5: fades, procedural) ---------------- */
-let AC = null, musicGain = null, musicTimer = null, musicStep = 0;
-function initAudio() {
-  if (AC) { if (AC.state === "suspended") AC.resume(); return; }
-  try {
-    AC = new (window.AudioContext || window.webkitAudioContext)();
-    musicGain = AC.createGain(); musicGain.gain.value = 0; musicGain.connect(AC.destination);
-    const notes = [110, 130.81, 164.81, 196, 164.81, 130.81, 98, 130.81]; // A minor sky-drift
-    musicTimer = setInterval(() => {
-      if (!AC || state !== "play") return;
-      const t = AC.currentTime;
-      const o = AC.createOscillator(), g = AC.createGain();
-      o.type = "triangle"; o.frequency.value = notes[musicStep % notes.length] * (musicStep % 16 >= 8 ? 2 : 1);
-      g.gain.setValueAtTime(0.0, t); g.gain.linearRampToValueAtTime(0.5, t + 0.03); g.gain.exponentialRampToValueAtTime(0.001, t + 0.42);
-      o.connect(g); g.connect(musicGain); o.start(t); o.stop(t + 0.45);
-      musicStep++;
-    }, 240);
-  } catch (e) { AC = null; }
-}
-function fadeMusic(to, seconds) {
-  if (!AC || !musicGain) return;
-  musicGain.gain.cancelScheduledValues(AC.currentTime);
-  musicGain.gain.setValueAtTime(musicGain.gain.value, AC.currentTime);
-  musicGain.gain.linearRampToValueAtTime(to, AC.currentTime + seconds);
-}
-function sfx(kind) {
-  if (!AC) return;
-  const t = AC.currentTime, o = AC.createOscillator(), g = AC.createGain();
-  o.connect(g); g.connect(AC.destination);
-  if (kind === "jump") { o.type = "square"; o.frequency.setValueAtTime(280, t); o.frequency.exponentialRampToValueAtTime(620, t + 0.12); }
-  if (kind === "collect") { o.type = "sine"; o.frequency.setValueAtTime(880, t); o.frequency.exponentialRampToValueAtTime(1560, t + 0.1); }
-  if (kind === "die") { o.type = "sawtooth"; o.frequency.setValueAtTime(320, t); o.frequency.exponentialRampToValueAtTime(55, t + 0.3); }
-  if (kind === "switch") { o.type = "square"; o.frequency.setValueAtTime(180, t); o.frequency.setValueAtTime(520, t + 0.07); }
-  if (kind === "goal") { o.type = "triangle"; o.frequency.setValueAtTime(523, t); o.frequency.setValueAtTime(784, t + 0.12); }
-  g.gain.setValueAtTime(0.12, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.32);
-  o.start(t); o.stop(t + 0.34);
-}
-
-/* ---------------- levels ----------------
-   Tiles are 16px. y grows downward. solids are [x,y,w,h] in tiles.
-   start / checkpoints are [tileX, surfaceTileY] (feet on that tile's top). */
-const LEVELS = [
-  {
-    name: "ISLE ONE — PORT MERIDIAN", sub: "Stable Atmosphere · Alliance harbour",
-    solids: [[0,18,14,4],[17,15,6,7],[24,18,15,4],[42,16,11,6],[58,18,13,4]],
-    slopes: [[14,17,"/"],[15,16,"/"],[16,15,"/"]],
-    through: [[28,15,6]],
-    spikes: [[47,15,2]],
-    movers: [{ x: 53, y: 17, w: 3, axis: "x", dist: 2, speed: 0.035, ship: "white" }],
-    npcs: [
-      { img: "npc_figure_a", x: 4, y: 18, line: "SHOPKEEPER: Dispatch for the great ship, pilot. Mind the Thin Air below." },
-      { img: "npc_figure_c", x: 30, y: 18, line: "MERCHANT: Compass shards fetch a fine price. The docks bounce you up — try them." },
-      { img: "npc_pilot", x: 62, y: 18, line: "PILOT: She sails when you board. R restarts, - and + hop isles." }
-    ],
-    shards: [[15,13],[31,12],[48,13],[56,14],[68,16]],
-    enemies: [{ x: 50, y: 16, min: 43, max: 51 }],
-    start: [2,18], checkpoints: [[35,18]],
-    goal: { x: 68, y: 18, w: 2, h: 3 },
-    door: null, sw: null
-  },
-  {
-    name: "ISLE TWO — THE REBEL CROSSING", sub: "Red sails on the wind · wall-climb the chimney",
-    solids: [[0,18,11,4],[12,18,9,4],[15,11,1,7],[19,11,1,7],[19,10,5,1],[41,14,15,8],[66,12,11,10]],
-    slopes: [[56,13,"/"],[57,12,"/"],[58,11,"/"]],
-    through: [[59,11,3],[62,9,3]],
-    spikes: [[46,13,2]],
-    movers: [{ x: 25, y: 13, w: 3, axis: "x", dist: 13, speed: 0.03, ship: "red" }],
-    npcs: [
-      { img: "npc_bride", x: 3, y: 18, line: "THE BRIDE: I was to sail Tuesday. The Rebels took the crossing." },
-      { img: "npc_rebel2", x: 69, y: 12, line: "A REBEL, OFF DUTY: ...you did not hear the chimney tip from me." }
-    ],
-    shards: [[17,8],[33,10],[47,11],[63,6],[74,10]],
-    enemies: [{ x: 44, y: 14, min: 42, max: 49 }, { x: 71, y: 12, min: 67, max: 75 }],
-    start: [2,18], checkpoints: [[43,14]],
-    goal: { x: 74, y: 12, w: 2, h: 3 },
-    door: null, sw: null
-  },
-  {
-    name: "ISLE THREE — THIN AIR", sub: "Cast off the chained ship · the anchored great ship waits",
-    solids: [[0,18,10,4],[16,10,9,2],[25,10,1,2],[26,10,11,2],[53,18,10,4],[55,8,1,10],[58,8,1,10],[58,7,6,1],[64,10,15,12]],
-    slopes: [],
-    through: [[11,14,3]],
-    spikes: [[31,9,2]],
-    movers: [
-      { x: 12, y: 15, w: 3, axis: "y", dist: 5, speed: 0.03, ship: "white" },
-      { x: 38, y: 13, w: 4, axis: "x", dist: 11, speed: 0.032, ship: "red", spiked: true }
-    ],
-    npcs: [
-      { img: "npc_skeleton", x: 4, y: 18, line: "THE SKELETON: I waited for a ship once. Stand on the mooring switch, pilot." },
-      { img: "npc_figure_a", x: 67, y: 10, line: "SHOPKEEPER: You made it across Thin Air. She is just ahead." }
-    ],
-    shards: [[12,11],[22,8],[44,10],[57,5],[76,8]],
-    enemies: [{ x: 29, y: 10, min: 27, max: 34 }, { x: 68, y: 10, min: 65, max: 70 }],
-    start: [2,18], checkpoints: [[27,10],[54,18]],
-    goal: { x: 76, y: 10, w: 2, h: 3 },
-    sw: { x: 22, y: 10 }, door: [25,6,1,4]
+/* ---------- objPlayer step (step_1.gml port; pixel-stepping) ---------- */
+function stepPlayer(p) {
+  const band = bandAt(roomName, p.y);
+  if (p.pickAlarm > 0) { p.pickAlarm--; if (p.pickAlarm === 0) p.pickUp = false; } // alarm_0: pickUp=false
+  const wasAir = p.isInAir;
+  if (K.right() && !K.left() && !p.pickUp) { p.dir = 1; p.isMoving = true; }
+  if (K.left() && !K.right() && !p.pickUp) { p.dir = -1; p.isMoving = true; }
+  if (!K.left() && !K.right()) p.isMoving = false;
+  if (K.jumpP() && !p.pickUp) { if (solidMeeting(p, 0, 1)) p.vspd = band.jump; }
+  // Take-off (W near objtakeOff)
+  const pad = nearest(p.x, p.y, ["objtakeOff"], p);
+  if (K.wP() && pad && dist(p, pad) <= 32) {
+    if (p.takeOff === 0) p.takeOff = 1;
+    else if (!p.isInAir) { gotoRoom("rmTravel"); mode = "ship"; showMessage("Take-off! Back to the ship."); return; }
   }
-];
-
-/* ---------------- game state (oGame, Pt 1) ---------------- */
-let state = "title"; // title | play | win
-let levelIdx = 0, level = null, fade = 0, fadeDir = 0, pendingAction = null;
-let timerFrames = 0, deaths = 0, totalShards = 0, demoMode = false, frame = 0;
-let camX = 0, doorOpen = false, switchLatch = false;
-let player = null, enemies = [], movers = [], shardsLeft = [];
-let respawn = { x: 0, y: 0 };
-const DEMO = new URLSearchParams(location.search).has("demo");
-
-function tileSolid(tx, ty) {
-  if (!level) return false;
-  for (const s of level.solids) if (tx >= s[0] && tx < s[0] + s[2] && ty >= s[1] && ty < s[1] + s[3]) return true;
-  if (level.door && !doorOpen) {
-    const d = level.door;
-    if (tx >= d[0] && tx < d[0] + d[2] && ty >= d[1] && ty < d[1] + d[3]) return true;
-  }
-  return false;
-}
-function slopeAt(tx, ty) {
-  for (const s of level.slopes) if (s[0] === tx && s[1] === ty) return s[2];
-  return null;
-}
-function slopeSurfaceY(tx, ty, dir, cx) {
-  const top = ty * TILE, lx = tx * TILE;
-  if (dir === "/") return top + TILE - (cx - lx);   // rises to the right
-  return top + (cx - lx);                            // "\" falls to the right
-}
-
-/* oParEntity (Pt 2/3/4), ported the way Zack Bell builds it:
-   - place_meeting() equivalents: solidAt() for tiles, deck tests for ships.
-   - Slopes are FLOOR, not walls (his collision article): they never block
-     horizontal steps; the end step lands on their surface and snaps down
-     to it while grounded, so a 45-degree ramp climbs 1px per 1px.
-   - Movement is whole pixels only. Fractions collect in cx/cy (Pt 4:
-     "collect the rounded sub-pixel numbers and add them when they exceed
-     a whole number") and are spent 1px at a time, checking at every pixel.
-   - onGround / cLeft / cRight are recomputed at the start of the step
-     (oParEntity 'begin step'), never carried stale from a create event. */
-function makeEntity(x, y) {
-  return { x, y, w: 12, h: 44, vx: 0, vy: 0, cx: 0, cy: 0, onGround: false,
-           cLeft: false, cRight: false, standingOn: null, face: 1, animT: 0,
-           dead: false, alarm: 0, canStick: true, sticking: false };
-}
-function solidAt(x, y, w, h) {
-  const tx0 = Math.floor(x / TILE), tx1 = Math.floor((x + w - 0.01) / TILE);
-  const ty0 = Math.floor(y / TILE), ty1 = Math.floor((y + h - 0.01) / TILE);
-  for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++)
-    if (tileSolid(tx, ty)) return true;
-  return false;
-}
-function deckAt(x, y, w, h, ignore) {
-  for (const m of movers) {
-    if (m === ignore) continue;
-    const d = m.deck();
-    if (x + w > d.x && x < d.x + d.w && y + h > d.y && y < d.y + d.h) return m;
-  }
-  return null;
-}
-function slopeSurfaceBelow(e) {
-  // surface height under the entity's centre, if a slope tile is right there
-  const cx = e.x + e.w / 2, tx = Math.floor(cx / TILE);
-  for (let ty = Math.floor((e.y + e.h) / TILE) - 1; ty <= Math.floor((e.y + e.h) / TILE) + 1; ty++) {
-    const dir = slopeAt(tx, ty);
-    if (dir) return slopeSurfaceY(tx, ty, dir, cx);
-  }
-  return null;
-}
-function OnGround(e) {
-  // Pt 2/3, verbatim in spirit: solid 1px below, OR jump-through 1px below
-  // that we are not already overlapping.
-  if (solidAt(e.x, e.y + 1, e.w, e.h)) return true;
-  const surf = slopeSurfaceBelow(e);
-  if (surf !== null && Math.abs((e.y + e.h) - surf) <= 1.5) return true;
-  for (const p of level.through) {
-    const px = p[0] * TILE, pw = p[2] * TILE, ptop = p[1] * TILE;
-    if (e.x + e.w > px && e.x < px + pw && Math.abs((e.y + e.h + 1) - ptop) <= 1.5) return true;
-  }
-  for (const m of movers) {
-    const d = m.deck();
-    if (e.x + e.w > d.x && e.x < d.x + d.w && Math.abs((e.y + e.h + 1) - d.y) <= 1.5) return true;
-  }
-  return false;
-}
-function tryMoveEntity(e, dx, dy, ignoreMover) {
-  // Pt 3/4 PlaceMeetingException: move 1px if the destination is free of
-  // solids and other decks — the calling platform itself is ignored,
-  // otherwise a platform could never push anything.
-  if (solidAt(e.x + dx, e.y + dy, e.w, e.h)) return false;
-  if (deckAt(e.x + dx, e.y + dy, e.w, e.h, ignoreMover || e.standingOn)) return false;
-  e.x += dx; e.y += dy;
-  return true;
-}
-function deckBelow(e) {
-  for (const m of movers) {
-    const d = m.deck();
-    if (e.x + e.w > d.x && e.x < d.x + d.w && Math.abs((e.y + e.h) - d.y) <= 1.5) return m;
-  }
-  return null;
-}
-function physMove(e) {
-  // ---- X, 1px at a time (Pt 4 sub-pixel accumulator) ----
-  e.cx += e.vx;
-  let wholeX = Math.trunc(e.cx); e.cx -= wholeX;
-  const dirX = Math.sign(wholeX);
-  e.cLeft = e.cRight = false;
-  while (wholeX !== 0) {
-    const nx = e.x + dirX;
-    const hitSolid = solidAt(nx, e.y, e.w, e.h);
-    // a deck blocks from the side only when the entity is below its top
-    const hitDeck = (() => {
-      const m = deckAt(nx, e.y, e.w, e.h, e.standingOn);
-      return m && (e.y + e.h) > m.deck().y + 2;
-    })();
-    if (hitSolid || hitDeck) {
-      if (dirX > 0) e.cRight = true; else e.cLeft = true;
-      e.vx = 0; e.cx = 0; break;
+  if (K.sP()) {
+    if (p.takeOff === 1) p.takeOff = 0;
+    if (!p.pickUp && !p.isInAir && !p.isMoving) {
+      const pk = nearest(p.x, p.y, ["objPickUpPar", "objFlowerPatch", "objSkybloomPatch", "objSalvage", "objSkull", "objskullTake", ...NPC_TYPES], p);
+      if (pk && dist(p, pk) <= 24) { p.pickUp = true; p.pickAlarm = 16; interact(p, pk); }
     }
-    e.x = nx; wholeX -= dirX;
   }
-  // Slope step-up: after moving horizontally into a ramp, lift the feet to
-  // its surface (his end-step slope handling). Without this, walking into
-  // a 45-degree ramp just sinks into it.
-  const surfX = slopeSurfaceBelow(e);
-  if (surfX !== null) {
-    const feet = e.y + e.h;
-    if (feet > surfX && feet - surfX <= TILE) e.y = surfX - e.h;
+  // Horizontal: repeat(spd) 1px steps, slope up/down (original algorithm)
+  if (p.isMoving) {
+    const spd = p.isInAir ? band.airSpd : p.spd;
+    for (let i = 0; i < spd; i++) {
+      if (!solidMeeting(p, Math.sign(p.dir), 0)) {
+        p.x += Math.sign(p.dir);
+        if (!solidMeeting(p, 0, 1) && !p.isInAir) p.y += 1; // down slope
+      } else if (!solidMeeting(p, Math.sign(p.dir), -1)) { p.x += Math.sign(p.dir); p.y -= 1; } // up slope
+    }
   }
-  // ---- Y, 1px at a time ----
-  e.cy += e.vy;
-  let wholeY = Math.trunc(e.cy); e.cy -= wholeY;
-  const dirY = Math.sign(wholeY);
-  e.standingOn = null;
-  while (wholeY !== 0) {
-    const prevBottom = e.y + e.h, prevTop = e.y;
-    const ny = e.y + dirY;
-    if (dirY > 0) {
-      // solid floor: land on the top of the blocking row
-      if (solidAt(e.x, ny, e.w, e.h)) {
-        const tyB = Math.floor((ny + e.h - 0.01) / TILE);
-        e.y = tyB * TILE - e.h; e.vy = 0; e.cy = 0; e.onGround = true; break;
+  // Vertical: repeat(abs(vspd)) 1px steps, sub-pixel fraction carried
+  p.frac += p.vspd; const steps = Math.trunc(p.frac); p.frac -= steps;
+  for (let i = 0; i < Math.abs(steps); i++) {
+    if (!solidMeeting(p, 0, Math.sign(steps))) { p.y += Math.sign(steps); if (solidMeeting(p, 0, -1)) p.vspd = 0; }
+    else { p.vspd = 0; break; }
+  }
+  if (!solidMeeting(p, 0, 1)) { p.isInAir = true; p.vspd += p.grav * band.grav; if (p.vspd > (band.name === "THICK AIR" ? 6 : 20)) p.vspd = band.name === "THICK AIR" ? 6 : 20; }
+  else { p.isInAir = false; p.vspd = 0; }
+  if (wasAir && !p.isInAir) p.frac = 0;
+  G.trade = !!nearest(p.x, p.y, TRADE_NPCS, p) && dist(p, nearest(p.x, p.y, TRADE_NPCS, p)) <= 24;
+  if (p.y > WORLD.rooms[roomName].h + 64) { const s = WORLD.rooms[roomName].insts.find(i => i[0] === "objPlayer"); if (s) { p.x = s[1]; p.y = s[2]; p.vspd = 0; } }
+}
+function interact(p, o) {
+  if (NPC_TYPES.includes(o.type)) { advanceSpeech(o); return; }
+  if (o.type === "objFlowerPatch" && o.stock > 0) { o.stock--; item_add(2, 1); showMessage("Picked a flower."); if (o.stock <= 0) destroy(o); return; }
+  if (o.type === "objSkybloomPatch" && o.stock > 0) { o.stock--; item_add(14, 1); showMessage("Picked a Skybloom."); if (o.stock <= 0) destroy(o); return; }
+  if (o.type === "objSalvage" && o.stock > 0) { o.stock--; item_add(15, 1); showMessage("Salvaged a chunk of sky-metal."); if (o.stock <= 0) destroy(o); return; }
+  if (o.type === "objskullTake" && o.stock > 0) { o.stock--; item_add(10, 1); showMessage("Took a skull."); if (o.stock <= 0) destroy(o); return; }
+  if (o.type === "objSkull" && o.stock > 0) { // objSkull GML adds item 6 (labelled "skull" in its comment; id 6 is Bomb in scr_items — original quirk, kept)
+    if (inventory_space() > 0) { o.stock--; item_add(6, 1); showMessage("Picked up... a bomb? (original adds item 6)"); if (o.stock <= 0) destroy(o); }
+    else showMessage("Your inventory is full!"); return;
+  }
+}
+function advanceSpeech(o) {
+  const lines = WORLD.texts[o.type] || [];
+  o.t++;
+  if (o.t > lines.length) { o.done = true; destroy(o); completeTrade(o); }
+}
+function completeTrade(o) {
+  // EXPANSION: the harbormaster marks the chart when his dialogue completes
+  // (not a trade — runs even when G.traded is 0).
+  if (o.type === "obj_harbormaster") {
+    if (!G.mapMarked) { G.mapMarked = true; showMessage("Chart marked: Garden Isle low in the Thick Air (south dock), the Derelict high in the Thin Air (north dock). F = compass."); }
+    return;
+  }
+  if (!G.traded) return;
+  if (o.type === "obj_speechTrade") { // the tribe trader's table
+    const n = G.tradestock;
+    if (G.tradeItem === 14) { // EXPANSION: Skybloom sells for 2 dubloons each
+      item_remove(14, n); item_add(1, n * 2); G.traded = 0; G.tradestock = 0; showMessage("Sold " + n + " Skybloom for " + (n * 2) + " dubloons.");
+    } else if (G.tradeItem === 15) { // EXPANSION: Salvage sells for 3 dubloons each
+      item_remove(15, n); item_add(1, n * 3); G.traded = 0; G.tradestock = 0; showMessage("Sold " + n + " Salvage for " + (n * 3) + " dubloons.");
+    } else { // flowers -> coal, 1:1 (mirrors mayorTrade pattern)
+      item_add(9, n); G.traded = 0; G.tradestock = 0; showMessage("Traded " + n + " flowers for " + n + " coal.");
+    }
+  } else if (o.type === "obj_mayorTrade" || o.type === "object55") { // obj_mayorTrade/keypress_83.gml
+    G.traded = 0;
+    if (G.tradeItem === 14) { // EXPANSION: the mayor's second chain — 5 Skybloom -> Double Cannon
+      if (G.tradestock >= 5) { item_remove(14, 5); item_add(11, 1); G.tradestock = 0; showMessage("The mayor trades: 5 Skybloom for a Double Cannon!"); }
+      else showMessage("The mayor wants 5 Skybloom for his Double Cannon.");
+    } else if (G.tradeItem === 15) { // EXPANSION: 8 Salvage -> Metal Shield
+      if (G.tradestock >= 8) { item_remove(15, 8); item_add(7, 1); G.tradestock = 0; showMessage("The mayor trades: 8 Salvage for a Metal Shield!"); }
+      else showMessage("The mayor wants 8 Salvage for his Metal Shield.");
+    } else if (G.tradestock >= 10) { item_add(5, 1); item_remove(9, 10); G.tradestock = 0; showMessage("Traded 10 coal for a Cannon!"); }
+    else showMessage("You do not have enough coal.");
+  }
+}
+
+/* ---------- vessels: objShip / objShip1 / objRowBoat (step_1.gml port) ---------- */
+function stepVessel(v) {
+  const band = bandAt(roomName, v.y);
+  const spdMult = v.kind === "ship" && G.hp <= 10 ? 0.5 : 1; // repair=1 -> SPEED halves (draw_0 sets repair when hp<=10)
+  const SPEED = Math.max(1, Math.round(v.SPEED * spdMult * (band.name === "THIN AIR" ? 0.8 : band.name === "THICK AIR" ? 1.15 : 1)));
+  const blocked = (dx, dy) => solidMeeting(v, dx, dy);
+  if (!K.up() && !K.down()) v.angle = 0;
+  if (K.up()) for (let i = 0; i < SPEED; i++) { if (!blocked(0, -1)) { v.y -= 1; v.angle = v.dir === 1 ? -40 : 40; } }
+  if (K.down()) for (let i = 0; i < SPEED; i++) { if (!blocked(0, 1)) { v.y += 2; v.angle = v.dir === 1 ? 40 : -40; } }
+  if (K.right() && !K.left()) for (let i = 0; i < SPEED; i++) { if (!blocked(1, 0)) { v.x += 1; v.dir = 1; } }
+  if (K.left() && !K.right()) for (let i = 0; i < SPEED; i++) { if (!blocked(-1, 0)) { v.x -= 1; v.dir = -1; } }
+  if (keys.Space) { // reverse thrust (objShip step_1 space block)
+    if (v.dir === 1) { if (!blocked(-1, 0)) v.x -= 3; } else if (!blocked(1, 0)) v.x += 3;
+  }
+  if (!blocked(v.dir, 0)) v.x += v.dir; // idle cruise: engine always pushes forward 1/step
+  // Air band drift (EXPANSION): thin air sinks unpowered vessels, thick air buoys them
+  if (!K.up() && !K.down() && band.sink !== 0) {
+    v.sinkAcc = (v.sinkAcc || 0) + band.sink * (v.kind === "rowboat" ? 1.6 : 1);
+    const s = Math.trunc(v.sinkAcc); v.sinkAcc -= s;
+    for (let i = 0; i < Math.abs(s); i++) { if (!blocked(0, Math.sign(s))) v.y += Math.sign(s); else break; }
+  }
+  const R = WORLD.rooms[roomName];
+  v.x = Math.max(20, Math.min(R.w - 20, v.x)); v.y = Math.max(20, Math.min(R.h - 20, v.y));
+  v.imgSpd = (K.up() || K.down() || K.left() || K.right()) ? 1 : 0.25; // "slow engine down" when no key
+  // --- firing (player cannon by equipped weapon; objShip step_1) ---
+  if (v.shootCd > 0) v.shootCd--;
+  const canShoot = v.shootCd <= 0;
+  const fireHeld = v.kind === "rowboat" ? (pressed.ControlLeft || pressed.ControlRight) : K.fire();
+  if (fireHeld && canShoot && G.equip[0]) {
+    if (G.atk === 30) { spawnBullet("objBullet", v); v.shootCd = v.kind === "rowboat" ? 30 : 15; }
+    else if (G.atk === 32 && v.kind !== "rowboat") { spawnBullet("objRearBullet", v); v.shootCd = 15; }
+    else if (G.atk === 40) { spawnBomb(v); v.shootCd = v.kind === "rowboat" ? 50 : 35; }
+    else if (G.atk === 35 && v.kind !== "rowboat") { spawnBullet("objBullet", v); spawnBullet("objBullet2", v); v.shootCd = 20; }
+  }
+  // --- crew auto-fire (objShip step_1 + alarm_1 ports) ---
+  if (v.crewCd > 0) v.crewCd--;
+  if (v.kind !== "rowboat" && v.crewShoot !== false) {
+    const foe = nearest(v.x, v.y, ENEMY_TYPES, v);
+    if (foe && dist(v, foe) <= 128 && v.crewCd <= 0) {
+      for (let i = 0; i < Math.max(0, G.crew - 1); i++) spawnCrewBullet(v, foe, false);
+      v.crewCd = 60; lastCombatFrame = frame;
+    }
+    const boat = nearest(v.x, v.y, ["objSmlBoat"], v);
+    if (boat && dist(v, boat) <= 64 && v.crewCd <= 0) { spawnCrewBullet(v, boat, false); v.crewCd = 20; lastCombatFrame = frame; }
+  }
+  if (G.hp <= 0 && v.kind !== "rowboat") destroy(v);
+  if (v.kind === "rowboat" && v.hp <= 0) destroy(v);
+}
+function spawnBullet(type, v) {
+  const b = create(type, v.x, v.y + (type === "objBomb" ? 8 : 0));
+  const band = bandAt(roomName, v.y);
+  if (type === "objBullet") {
+    if (!K.up() && !K.down()) { b.vx = 8 * v.dir; b.vy = -5; }
+    else if (K.up()) { b.vx = 4 * v.dir; b.vy = -11; }
+    else { b.vx = 8 * v.dir; b.vy = -2; }
+  } else if (type === "objBullet2") { b.vx = 8 * v.dir; b.vy = -7; }
+  else if (type === "objRearBullet") { b.vx = -8 * v.dir; b.vy = -5; }
+  b.grav = band.projGrav; return b;
+}
+function spawnBomb(v) { const b = create("objBomb", v.x, v.y + 8); b.vx = v.dir === 1 ? -3 : 3; b.vy = -5; b.grav = bandAt(roomName, v.y).projGrav; b.dir = v.dir; return b; }
+function spawnCrewBullet(from, target, enemy) {
+  const b = create(enemy ? "objECrewBullet" : "objCrewBullet", from.x + choose(-4, -8, -18, 16, 8, 4) * (enemy ? 0.3 : 1), from.y);
+  const tx = target.x + choose(-6, -3, 0, 3, 6), ty = target.y - choose(2, 6, 10);
+  const d = Math.hypot(tx - b.x, ty - b.y) || 1, sp = enemy ? choose(5, 6, 7) : choose(4, 5, 6);
+  b.vx = (tx - b.x) / d * sp; b.vy = (ty - b.y) / d * sp; b.imgSpd = 0; b.xscale = 0.5; b.yscale = 0.5; return b;
+}
+
+/* ---------- enemies: objEnemyBomber + objSmlBoat (flocking + raids) ---------- */
+function steer(e, tx, ty, spd, avoidBlocks) {
+  const a = Math.atan2(ty - e.y, tx - e.x);
+  const nx = e.x + Math.cos(a) * spd, ny = e.y + Math.sin(a) * spd;
+  const save = { x: e.x, y: e.y };
+  e.x = nx; e.y = ny;
+  if (avoidBlocks && solidMeeting(e, 0, 0)) { e.x = save.x; if (solidMeeting(e, 0, 0)) { e.x = nx; e.y = save.y; if (solidMeeting(e, 0, 0)) { e.x = save.x; e.y = save.y; } } }
+  e.ang = a * 180 / Math.PI;
+}
+function flock(e, fleeTypes, fleeR) { // alarm_0 port (simplified): separation + flee projectiles + ship avoidance for bombers
+  let ax = 0, ay = 0, n = 0;
+  for (const o of ents) {
+    if (o === e || o.dead) continue;
+    const d = dist(e, o);
+    if (o.type === e.type && d < 32) { ax += (e.x - o.x) / (d + 1) * (d < 16 ? 2 : 1); ay += (e.y - o.y) / (d + 1) * (d < 16 ? 2 : 1); n++; }
+    else if (fleeTypes.includes(o.type) && d < fleeR) { ax += (e.x - o.x) / (d + 1) * 5; ay += (e.y - o.y) / (d + 1) * 5; n++; }
+    else if (e.type === "objEnemyBomber" && o.type === "objGold" && d < 50) { ax += Math.cos(o.ang || 0); ay += Math.sin(o.ang || 0); n++; }
+  }
+  if (n) { e.ang = Math.atan2(ay, ax) * 180 / Math.PI; }
+}
+function stepBomber(e) {
+  e.x += Math.cos(e.ang * Math.PI / 180) * 3; e.y += Math.sin(e.ang * Math.PI / 180) * 3;
+  wrapRoom(e);
+  if (solidMeeting(e, 0, 0)) { // push out of blocks (collision_objBlock16 port)
+    const c = nearest(e.x, e.y, ["objBlock16"], e); if (c) { const a = Math.atan2(e.y - c.y, e.x - c.x); e.x += Math.cos(a); e.y += Math.sin(a); }
+    e.ang += 180;
+  }
+  if (--e.flockCd <= 0) { e.flockCd = 20; flock(e, ["objBullet", "objBullet2", "objRearBullet", "objCrewBullet", "objBomb"], 64); }
+  if (vessel && G.shipnum !== 0) {
+    const d = dist(e, vessel);
+    if (d < 200 && d > 64) steer(e, vessel.x, vessel.y - 64, 1, true);
+    else if (d < 32) steer(e, vessel.x, vessel.y, -2, true);
+    if (e.shootCd > 0) e.shootCd--;
+    if (d <= 64 && e.canShoot && e.shootCd <= 0) { const b = create("objEBomb", e.x, e.y); b.vy = -5; b.vx = 0; b.grav = bandAt(roomName, e.y).projGrav; e.shootCd = 50; lastCombatFrame = frame; }
+    if (e.crewCd > 0) e.crewCd--;
+    if (d <= 128 && e.crewShoot && e.crewCd <= 0) { for (let i = 0; i < e.crew; i++) spawnCrewBullet(e, vessel, true); e.crewCd = 60; lastCombatFrame = frame; }
+  }
+  if (e.hp <= 0) destroy(e);
+}
+function stepSmlBoat(e) {
+  e.x += Math.cos(e.ang * Math.PI / 180) * e.spd; e.y += Math.sin(e.ang * Math.PI / 180) * e.spd;
+  wrapRoom(e);
+  if (solidMeeting(e, 0, 0)) { const c = nearest(e.x, e.y, ["objBlock16"], e); if (c) { const a = Math.atan2(e.y - c.y, e.x - c.x); e.x += Math.cos(a) * 2; e.y += Math.sin(a) * 2; } e.ang += 180; }
+  if (--e.flockCd <= 0) { e.flockCd = 20; flock(e, ["objBullet", "objBullet2", "objRearBullet", "objCrewBullet", "objBomb"], 32); }
+  const dock = nearest(e.x, e.y, ["objEnemyDock"], e);
+  if (e.hp < 10 && dock) steer(e, dock.x, dock.y, 4, true); // retreat to enemy dock when hurt
+  else if (vessel && G.shipnum !== 0) {
+    const d = dist(e, vessel);
+    if (d < 200 && d > 128) steer(e, vessel.x, vessel.y - 8, 4, false);
+    if (e.shootCd > 0) e.shootCd--;
+    if (d <= 64 && e.canShoot && e.shootCd <= 0) {
+      const b = create("objEBullet", e.x, e.y); b.vx = vessel.x >= e.x ? 6 : -6; b.vy = -4; b.grav = bandAt(roomName, e.y).projGrav; b.imgSpd = 0; e.shootCd = 50; lastCombatFrame = frame;
+    }
+    if (e.crewCd > 0) e.crewCd--;
+    if (d <= 128 && e.crewShoot && e.crewCd <= 0) { for (let i = 0; i < e.crew; i++) spawnCrewBullet(e, vessel, true); e.crewCd = 120; lastCombatFrame = frame; }
+  }
+  if (e.hp <= 0) destroy(e);
+}
+function wrapRoom(e) { const R = WORLD.rooms[roomName]; if (e.x < -2) e.x = R.w + 2; if (e.x > R.w + 2) e.x = -2; if (e.y < -2) e.y = R.h + 2; if (e.y > R.h + 2) e.y = -2; }
+
+/* ---------- projectiles / particles / misc steps ---------- */
+function damageEnemy(e, dmg) { e.hp -= dmg; lastCombatFrame = frame; }
+function stepProjectile(e) {
+  const enemySide = ["objEBullet", "objECrewBullet", "objEBomb"].includes(e.type);
+  if (e.grav !== undefined) e.vy += e.grav; // crew bullets fly straight (move_towards_point, no gravity in the GML)
+  e.x += e.vx; e.y += e.vy;
+  if (e.type === "objBomb" || e.type === "objEBomb") { e.angle += e.dir === 1 ? -5 : 5; if (--e.fuse <= 0) { destroy(e); return; } }
+  if (solidMeeting(e, 0, 0)) { destroy(e); return; }
+  if (enemySide) {
+    if (vessel && overlap(bbox(e), bbox(vessel))) {
+      if (e.type === "objEBullet") { G.hp -= 2; if (G.crew > 1) { const c = choose(0, 0, 1, 2); G.crew = Math.max(1, G.crew - c); } }
+      else if (e.type === "objECrewBullet") G.hp -= 1;
+      lastCombatFrame = frame; destroy(e); return;
+    }
+  } else {
+    const foe = nearest(e.x, e.y, ENEMY_TYPES, e);
+    if (foe && overlap(bbox(e), bbox(foe))) {
+      damageEnemy(foe, e.type === "objCrewBullet" ? (foe.type === "objEnemyBomber" ? 1 : 0.5) : 2);
+      destroy(e); return;
+    }
+  }
+  const R = WORLD.rooms[roomName];
+  if (e.x < -32 || e.y < -32 || e.x > R.w + 32 || e.y > R.h + 32) e.dead = true; // outside room
+}
+function stepParticle(e) { // objGold / objDebris / objShrapnel / objCrew (ejected crew)
+  const band = bandAt(roomName, e.y);
+  let grav = e.type === "objGold" ? band.projGrav : 0.8;
+  if (e.type === "objGold" && G.equip[1] === 13 && vessel && dist(e, vessel) <= 96) { // Dubloon Magnet (objGold/step_1)
+    const a = Math.atan2(vessel.y - e.y, vessel.x - e.x); e.vx += Math.cos(a) * 0.4; e.vy += Math.sin(a) * 0.4;
+  } else e.vy += grav;
+  e.x += e.vx; e.y += e.vy;
+  if (solidMeeting(e, 0, 0)) { e.y -= Math.sign(e.vy) || -1; e.vy *= -0.4; e.vx *= 0.8; if (e.type === "objGold") { e.vx *= 0.9; } }
+  if (e.type === "objCrew") e.angle += e.spin === 1 ? -5 : 5;
+  if (e.type === "objGold" && vessel && roomName === "rmTravel" && overlap(bbox(e), bbox(vessel))) { item_add(1, 1); e.dead = true; return; }
+  if (e.type === "objGold" && anyEnemyTouch(e)) { e.dead = true; return; } // enemies steal gold (collision_objEnemyPar)
+  if (--e.life <= 0) e.dead = true;
+}
+function anyEnemyTouch(e) { const f = nearest(e.x, e.y, ENEMY_TYPES, e); return f && overlap(bbox(e), bbox(f)); }
+function stepShadow(e) { // objShadow: alpha by player distance / line of sight (simplified LOS)
+  if (!player) { e.alpha = 0.75; return; }
+  const d = dist(e, player);
+  e.alpha = d <= 32 ? 0.4 : d <= 64 ? 0.5 : d <= 96 ? 0.6 : 0.75;
+}
+
+/* ---------- docks (collision_objShip events) ---------- */
+const DOCK_DEST = { objDock: "rmExplore", objDock2: "rmExplore2", objDock3: "rmExplore3", objEnemyDock: "rmExplore4", objDock4: "rmGarden", objDock5: "rmDerelict" };
+function checkDocks(v) {
+  for (const d of ents) {
+    if (d.dead || !DOCK_DEST[d.type]) continue;
+    if (overlap(bbox(v), bbox(d))) {
+      if (d.type === "objDock" && nearest(v.x, v.y, ["objSmlBoat"], v) && dist(v, nearest(v.x, v.y, ["objSmlBoat"], v)) <= 128) {
+        showMessage("You cannot dock when enemies are around"); v.y -= 32; return;
       }
-      // slope floor: land on the surface at the centre
-      const surf = slopeSurfaceBelow({ x: e.x, y: ny, w: e.w, h: e.h });
-      if (surf !== null && prevBottom <= surf + 0.5 && ny + e.h >= surf) {
-        e.y = surf - e.h; e.vy = 0; e.cy = 0; e.onGround = true; break;
+      for (const g of ents) if (g.type === "objGold") g.dead = true; // with objGold instance_destroy (dock events)
+      v.y -= 32;
+      gotoRoom(DOCK_DEST[d.type]); mode = "foot";
+      showMessage("Docked: " + DOCK_DEST[d.type] + " — explore on foot. W at a take-off pad returns to the ship.");
+      return;
+    }
+  }
+}
+
+/* ---------- obj_control: crew repair alarm + debug spawns + raids (EXPANSION) ---------- */
+let healTimer = 50;
+function stepControl() {
+  G.atk = G.base_attack + (ITEMS.atk[G.equip[0]] || 0);
+  G.def = G.base_defense + (ITEMS.def[G.equip[1]] || 0);
+  for (let k = 0; k < G.invH; k++) for (let i = 0; i < G.invW; i++) if (!G.stack[k][i]) G.inventory[k][i] = 0;
+  // Crew repair (obj_control/alarm_0): cycle length shrinks as crew grows.
+  // EXPANSION rule: repairs only while out of combat (no enemy fire for 3s).
+  if (--healTimer <= 0) {
+    healTimer = G.crew <= 2 ? 150 : G.crew <= 5 ? 100 : G.crew <= 10 ? 50 : G.crew <= 15 ? 25 : G.crew <= 25 ? 15 : 5;
+    if (G.hp <= G.max_hp - 1 && G.crew >= 2 && frame - lastCombatFrame > 90 && (mode === "ship")) G.hp += 1;
+  }
+  if (pressed.Digit1 && vessel) create("objSmlBoat", mouseX + cam.x, mouseY + cam.y); // obj_control/step_2 debug spawns
+  if (pressed.Digit2 && vessel) create("objEnemyBomber", mouseX + cam.x, mouseY + cam.y);
+  if (pressed.Digit3) { gotoRoom("rm_test"); } // dev access to the test room (EXPANSION)
+  // EXPANSION: enemy raids on the travel hub
+  if (roomName === "rmTravel" && started && !TEST) {
+    if (--raidTimer <= 0) {
+      raidTimer = 45 * 30;
+      const docks = ents.filter(e => e.type === "objEnemyDock");
+      const foeCount = ents.filter(e => isEnemy(e) && !e.dead).length;
+      if (docks.length && foeCount < 16) {
+        const d = choose(...docks);
+        if (Math.random() < 0.5) create("objEnemyBomber", d.x, d.y); else { create("objSmlBoat", d.x + 16, d.y); create("objSmlBoat", d.x - 16, d.y); }
+        showMessage("Raiders incoming from an enemy dock!");
       }
-      // jump-through dock: land only when falling onto the top (Pt 3)
-      let landed = false;
-      for (const p of level.through) {
-        const px = p[0] * TILE, pw = p[2] * TILE, ptop = p[1] * TILE;
-        if (e.x + e.w > px && e.x < px + pw && prevBottom <= ptop + 0.5 && ny + e.h >= ptop) {
-          e.y = ptop - e.h; e.vy = 0; e.cy = 0; e.onGround = true; landed = true; break;
+    }
+  }
+}
+
+/* ---------- per-step dispatch ---------- */
+const PROJECTILES = ["objBullet", "objBullet2", "objRearBullet", "objCrewBullet", "objEBullet", "objECrewBullet", "objBomb", "objEBomb"];
+let CREATED = 0; const _create = create; create = function (t, x, y, p) { CREATED++; return _create(t, x, y, p); };
+function stepAll() {
+  frame++;
+  stepControl();
+  if (mode === "foot" && player && !player.dead) stepPlayer(player);
+  if (mode === "ship" && vessel && !vessel.dead) { stepVessel(vessel); if (!vessel.dead) checkDocks(vessel); }
+  for (const e of [...ents]) {
+    if (e.dead) continue;
+    e.t++;
+    if (e.imgSpd) e.img += e.imgSpd;
+    switch (e.type) {
+      case "objEnemyBomber": stepBomber(e); break;
+      case "objSmlBoat": stepSmlBoat(e); break;
+      case "objGold": case "objDebris": case "objShrapnel": case "objCrew": stepParticle(e); break;
+      case "objShadow": stepShadow(e); break;
+      case "objBlast": if (--e.life <= 0) e.dead = true; break;
+      case "objSMLBlast": case "objESmlBlast":
+        if (e.t === 1) { // explosion moment: area damage (collision ports)
+          if (e.type === "objESmlBlast") burst(e, "objShrapnel", 5);
+          if (vessel && dist(e, vessel) <= 40) { G.hp -= 5; lastCombatFrame = frame; }
+          for (const f of ents) if (isEnemy(f) && !f.dead && dist(e, f) <= 40) damageEnemy(f, 5);
         }
-      }
-      if (landed) break;
-      // ship deck: land only when falling onto the top
-      const dm = deckAt(e.x, ny, e.w, e.h, null);
-      if (dm && prevBottom <= dm.deck().y + 0.5) {
-        e.y = dm.deck().y - e.h; e.vy = 0; e.cy = 0; e.onGround = true; e.standingOn = dm; break;
-      }
-      e.y = ny; wholeY -= dirY; e.onGround = false;
-    } else {
-      // ceiling: solid above, or a deck hit from below
-      if (solidAt(e.x, ny, e.w, e.h)) { e.vy = 0; e.cy = 0; break; }
-      const dm = deckAt(e.x, ny, e.w, e.h, null);
-      if (dm && prevTop >= dm.deck().y + dm.deck().h - 1) { e.vy = 0; e.cy = 0; break; }
-      e.y = ny; wholeY -= dirY;
+        if (--e.life <= 0) e.dead = true; break;
+      case "objCrate": // objCrate/step_0: falls until a block or another crate
+        if (!solidMeeting(e, 0, 1) && !placeMeeting(e, 0, 1, ["objCrate"])) e.y += 2; break;
+      case "obj_speechTrade": G.canTrade = (item_amount(2) >= 1 || item_amount(14) >= 1 || item_amount(15) >= 1) ? 1 : 0; break;
+      case "obj_mayorTrade": case "object55": G.canTrade = (item_amount(9) >= 1 || item_amount(14) >= 1 || item_amount(15) >= 1) ? 1 : 0; break;
+      default:
+        if (PROJECTILES.includes(e.type)) stepProjectile(e);
     }
   }
-  // grounded on a slope: snap feet back down to the surface after X steps,
-  // so running down a ramp never floats (his end-step slope handling).
-  if (e.onGround) {
-    const surf = slopeSurfaceBelow(e);
-    if (surf !== null && (e.y + e.h) < surf && surf - (e.y + e.h) <= 8) e.y = surf - e.h;
-  }
+  ents = ents.filter(e => !e.dead);
+  if (vessel && vessel.dead) vessel = ents.find(e => ["objShip", "objShip1", "objRowBoat"].includes(e.type)) || vessel;
+  // clicks (mouse events are view-space; convert in handlers)
+  while (clicks.length) handleClick(clicks.shift(), false);
+  while (rclicks.length) handleClick(rclicks.shift(), true);
+  for (const k in pressed) delete pressed[k];
+  if (toastT > 0) toastT--;
+  focusCamera(false);
+}
+function focusCamera(snap) {
+  const R = WORLD.rooms[roomName]; if (!R) return;
+  const tgt = mode === "ship" ? vessel : player; if (!tgt) return;
+  let tx = tgt.x - VW / 2, ty = tgt.y - VH / 2;
+  tx = R.w <= VW ? (R.w - VW) / 2 : Math.max(0, Math.min(R.w - VW, tx));
+  ty = R.h <= VH ? (R.h - VH) / 2 : Math.max(0, Math.min(R.h - VH, ty));
+  if (snap) { cam.x = tx; cam.y = ty; } else { cam.x += (tx - cam.x) * 0.35; cam.y += (ty - cam.y) * 0.35; }
 }
 
-/* ---------------- movers: airships (Pt 3/4) ----------------
-   Zack Bell's moving platforms, ported, not approximated:
-   - CONSTANT velocity along the route (his platforms never ease).
-   - Bumper reversal (Pt 3): at the end of the route the velocity flips,
-     exactly like bouncing off an oBumper — no sine, no easing.
-   - The platform moves in its END step, 1px at a time, and for every pixel
-     it moves every entity standing on it by the same pixel, and pushes any
-     entity it runs into (Pt 3/4), with PlaceMeetingException: the check for
-     whether the pushed entity can move ignores the platform itself.
-   - Composite objects (Pt 4): hazards keep a stored parent offset (dx/dy)
-     from the ship and ride it exactly. */
-function makeMover(def) {
-  const speedPx = 0.6; // px per frame, constant — his platforms cruise
-  const m = {
-    def, cx: 0, cy: 0, spikeRect: null,
-    px: def.x * TILE, py: def.y * TILE,
-    minX: def.x * TILE, maxX: (def.x + def.dist) * TILE,
-    minY: (def.y - def.dist) * TILE, maxY: def.y * TILE,
-    vx: def.axis === "x" ? speedPx : 0,
-    vy: def.axis === "y" ? -speedPx : 0,
-    deck() { return { x: this.px, y: this.py, w: this.def.w * TILE, h: 10 }; },
-    update() {
-      // X route, 1px at a time; reverse at the bumpers
-      this.cx += this.vx;
-      let wholeX = Math.trunc(this.cx); this.cx -= wholeX;
-      const dirX = Math.sign(wholeX);
-      while (wholeX !== 0) {
-        const nx = this.px + dirX;
-        if (nx < this.minX || nx > this.maxX) { this.vx *= -1; this.cx = 0; wholeX = 0; break; }
-        this.px = nx; wholeX -= dirX;
-        for (const e of [player, ...enemies]) {
-          if (!e || e.dead) continue;
-          if (e.standingOn === this) { if (!tryMoveEntity(e, dirX, 0, this)) e.standingOn = null; }
-          else if (deckBelow(e) === this || overlap(e, this.deck())) tryMoveEntity(e, dirX, 0, this);
-        }
-      }
-      // Y route, 1px at a time; reverse at the bumpers
-      this.cy += this.vy;
-      let wholeY = Math.trunc(this.cy); this.cy -= wholeY;
-      const dirY = Math.sign(wholeY);
-      while (wholeY !== 0) {
-        const ny = this.py + dirY;
-        if (ny < this.minY || ny > this.maxY) { this.vy *= -1; this.cy = 0; wholeY = 0; break; }
-        this.py = ny; wholeY -= dirY;
-        for (const e of [player, ...enemies]) {
-          if (!e || e.dead) continue;
-          if (e.standingOn === this) { if (!tryMoveEntity(e, 0, dirY, this)) e.standingOn = null; }
-          else if (deckBelow(e) === this || overlap(e, this.deck())) tryMoveEntity(e, 0, dirY, this);
-        }
-      }
-      // composite hazard: stored parent offset, rides exactly (Pt 4)
-      if (this.def.spiked) {
-        const d = this.deck();
-        this.spikeRect = { x: d.x + 4, y: d.y - 8, w: 20, h: 8 };
-      }
+/* ---------- mouse: inventory (obj_control mouse_53/54/56) + world buttons ---------- */
+function invCellAt(sx, sy) { // inventory panel drawn at (0,7); cells 32px, x0=7, y0=11, dy=33
+  if (!G.invShow) return null;
+  for (let k = 0; k < G.invH; k++) for (let i = 0; i < G.invW; i++) {
+    const x = 7 + i * 32, y = 11 + k * 33;
+    if (sx >= x && sx < x + 32 && sy >= y && sy < y + 32) return { i, k };
+  } return null;
+}
+function equipCellAt(sx, sy) {
+  if (!G.equipShow) return null;
+  for (let j = 0; j < 2; j++) { const x = 232 + j * 34, y = 32; if (sx >= x && sx < x + 32 && sy >= y && sy < y + 32) return j; }
+  return null;
+}
+function openMenu(kind, i, k) { // scripts/scr_*_menu.gml
+  G.menuShow = true; G.menuX = mouseX; G.menuY = mouseY; G.menuSelH = i; G.menuSelV = k; G.menuCtx = kind;
+  if (kind === "equip") G.menu = ["Unequip"];
+  else {
+    const t = ITEMS.type[G.inventory[k][i]];
+    G.menu = t === "consumable" ? ["Consume", "Drop", "Examine", "Trade"] : (t === "weapon" || t === "shield") ? ["Equip", "Examine", "Drop"] : ["Trade", "Examine", "Drop"];
+  }
+}
+function menuAction(act) {
+  const k = G.menuSelV, i = G.menuSelH;
+  if (G.menuCtx === "equip") {
+    if (act === "Unequip") {
+      for (let kk = 0; kk < G.invH; kk++) for (let jj = 0; jj < G.invW; jj++)
+        if (!G.inventory[kk][jj]) { G.inventory[kk][jj] = G.equip[i]; G.stack[kk][jj] += 1; G.equip[i] = 0; G.menuShow = false; return; }
+      showMessage("Your inventory is full!");
     }
-  };
-  return m;
-}
-
-/* ---------------- level lifecycle (Pt 5: fades) ---------------- */
-function loadLevel(idx, keepTimer) {
-  levelIdx = idx; level = LEVELS[idx];
-  doorOpen = false; switchLatch = false;
-  movers = level.movers.map(makeMover);
-  enemies = level.enemies.map(en => {
-    const e = makeEntity(en.x * TILE + 2, en.y * TILE - 44);
-    e.dir = 1; e.min = en.min * TILE; e.max = en.max * TILE; return e;
-  });
-  shardsLeft = level.shards.map(s => ({ x: s[0] * TILE + 8, y: s[1] * TILE + 8, taken: false }));
-  respawn = { x: level.start[0] * TILE + 2, y: level.start[1] * TILE - 44 };
-  player = makeEntity(respawn.x, respawn.y);
-  player.alarm = 0; player.canStick = true; player.sticking = false;
-  camX = clamp(player.x - W / 2, 0, levelWidth() - W);
-  if (!keepTimer) { /* timer runs across the whole voyage */ }
-  fadeMusic(0.16, 1.0);
-}
-function levelWidth() {
-  let max = 0;
-  for (const s of level.solids) max = Math.max(max, (s[0] + s[2]) * TILE);
-  return Math.max(max, W);
-}
-function startFade(action) { fadeDir = 1; pendingAction = action; fadeMusic(0.0, 0.25); }
-function die() {
-  if (fadeDir) return;
-  deaths++; sfx("die");
-  startFade(() => {
-    player = makeEntity(respawn.x, respawn.y);
-    player.alarm = 0; player.canStick = true; player.sticking = false;
-    fadeMusic(0.16, 1.0);
-  });
-}
-
-/* ---------------- player update (Pt 2 tuning, verbatim ratios) ---------------- */
-const M = 1.0; // Zack's overall speed multiplier
-const TUNE = { groundAccel: 1.0 * M, groundFric: 1.9 * M, airAccel: 0.75 * M, airFric: 0.1 * M,
-  vxMax: 6.5 * M, vyMax: 10.0 * M, jumpHeight: 8.0 * M, gravNorm: 0.5 * M, gravSlide: 0.25 * M, clingTime: 4.0 * M };
-let demoStuck = 0, demoLastX = 0;
-function demoInput() {
-  // attract mode: run right, jump gaps/walls, wall-jump by pressing INTO the wall
-  const inp = { left: false, right: true, down: false, jump: false, jumpPressed: false, jumpReleased: false };
-  const aheadX = player.face >= 0 ? player.x + player.w + 4 : player.x - 4;
-  const groundAhead = tileSolid(Math.floor(aheadX / TILE), Math.floor((player.y + player.h + 6) / TILE));
-  const wallAhead = tileSolid(Math.floor(aheadX / TILE), Math.floor((player.y + 20) / TILE));
-  if (player.onGround && (!groundAhead || wallAhead)) inp.jumpPressed = true, inp.jump = true;
-  if (!player.onGround && (player.cLeft || player.cRight)) {
-    inp.jumpPressed = true; inp.jump = true;
-    inp.left = !!player.cLeft; inp.right = !!player.cRight; // press into the wall
+    return;
   }
-  if (Math.abs(player.x - demoLastX) < 0.1 && player.onGround) { if (++demoStuck > 200) { demoStuck = 0; die(); } } else demoStuck = 0;
-  demoLastX = player.x;
-  return inp;
-}
-function updatePlayer(inp) {
-  // oPlayer 'step event' (Pt 2), in Zack Bell's order, verbatim in structure.
-  const p = player;
-  // oParEntity 'begin step': refresh grounded state and wall checks
-  p.onGround = OnGround(p);
-  p.standingOn = deckBelow(p); // a deck under the feet is what the ship carries
-  p.cLeft = solidAt(p.x - 1, p.y, p.w, p.h);
-  p.cRight = solidAt(p.x + 1, p.y, p.w, p.h);
-  // Apply the correct form of acceleration and friction
-  const tempAccel = p.onGround ? TUNE.groundAccel : TUNE.airAccel;
-  const tempFric = p.onGround ? TUNE.groundFric : TUNE.airFric;
-  // Reset wall cling
-  if ((!p.cRight && !p.cLeft) || p.onGround) { p.canStick = true; p.sticking = false; }
-  // Cling to wall: alarm[0] = clingTime; the alarm event clears sticking
-  if (((inp.right && p.cLeft) || (inp.left && p.cRight)) && p.canStick && !p.onGround) {
-    p.alarm = TUNE.clingTime; p.sticking = true; p.canStick = false;
+  const id = G.inventory[k][i]; if (!id) return;
+  if (act === "Examine") showMessage(ITEMS.name[id] + " — " + ITEMS.info[id]);
+  if (act === "Drop") G.stack[k][i] = 0;
+  if (act === "Consume") {
+    if (G.hp !== G.max_hp) { G.hp = Math.min(G.hp + (ITEMS.hp[id] || 0), G.max_hp); G.stack[k][i] = 0; }
+    else showMessage("Your health is already full!");
   }
-  if (p.alarm > 0) { p.alarm--; if (p.alarm === 0) p.sticking = false; }
-  // Handle gravity
-  if (!p.onGround) {
-    if ((p.cLeft || p.cRight) && p.vy >= 0) {
-      // Wall slide
-      p.vy = Approach(p.vy, TUNE.vyMax, TUNE.gravSlide);
-    } else {
-      // Fall normally
-      p.vy = Approach(p.vy, TUNE.vyMax, TUNE.gravNorm);
+  if (act === "Trade") {
+    G.tradeItem = id; G.tradestock = G.stack[k][i];
+    if (G.trade && G.canTrade) { G.traded = 1; const npc = nearest(player.x, player.y, TRADE_NPCS, player); if (npc) completeTrade(npc); }
+    else showMessage("No one is around to trade this.");
+  }
+  if (act === "Equip") {
+    const t = ITEMS.type[id], slot = t === "weapon" ? 0 : 1;
+    const change = G.inventory[k][i]; G.inventory[k][i] = G.equip[slot]; if (!G.inventory[k][i]) G.stack[k][i] = 0; else G.stack[k][i] = 1;
+    G.equip[slot] = change;
+  }
+  G.menuShow = false;
+}
+function handleClick(c, right) {
+  const sx = c.sx, sy = c.sy;
+  if (G.menuShow) {
+    for (let i = 0; i < G.menu.length; i++) {
+      const y = G.menuY + i * 15;
+      if (sx >= G.menuX && sx < G.menuX + 64 && sy >= y && sy < y + 16) { menuAction(G.menu[i]); return; }
     }
+    G.menuShow = false; return;
   }
-  // Left
-  if (inp.left && !inp.right && !p.sticking) {
-    if (p.vx > 0) p.vx = Approach(p.vx, 0, tempFric);
-    p.vx = Approach(p.vx, -TUNE.vxMax, tempAccel); p.face = -1;
+  const cell = invCellAt(sx, sy), eq = equipCellAt(sx, sy);
+  if (right) {
+    if (eq !== null && G.equip[eq]) { openMenu("equip", eq, 0); return; }
+    if (cell && G.inventory[cell.k][cell.i] && !G.mouseSelObj) { openMenu("inv", cell.i, cell.k); return; }
+    return;
   }
-  // Right
-  if (inp.right && !inp.left && !p.sticking) {
-    if (p.vx < 0) p.vx = Approach(p.vx, 0, tempFric);
-    p.vx = Approach(p.vx, TUNE.vxMax, tempAccel); p.face = 1;
-  }
-  // Friction
-  if (!inp.right && !inp.left) p.vx = Approach(p.vx, 0, tempFric);
-  // Wall jump
-  if (inp.jumpPressed && p.cLeft && !p.onGround) {
-    if (inp.left) { p.vy = -TUNE.jumpHeight * 1.1; p.vx = TUNE.jumpHeight * .75; }
-    else { p.vy = -TUNE.jumpHeight * 1.1; p.vx = TUNE.vxMax; }
-    p.sticking = false; sfx("jump");
-  }
-  if (inp.jumpPressed && p.cRight && !p.onGround) {
-    if (inp.right) { p.vy = -TUNE.jumpHeight * 1.1; p.vx = -TUNE.jumpHeight * .75; }
-    else { p.vy = -TUNE.jumpHeight * 1.1; p.vx = -TUNE.vxMax; }
-    p.sticking = false; sfx("jump");
-  }
-  // Jump
-  if (inp.jumpPressed) {
-    if (p.onGround) { p.vy = -TUNE.jumpHeight; sfx("jump"); }
-    // Variable jumping
-  } else if (inp.jumpReleased) {
-    if (p.vy < 0) p.vy *= 0.25;
-  }
-  physMove(p); // oParEntity end step: pixel-stepped collision
-  p.onGround = OnGround(p);
-  p.animT += Math.abs(p.vx) > 0.4 && p.onGround ? Math.abs(p.vx) * 0.055 : 0;
-  // checkpoints
-  for (const c of level.checkpoints) {
-    const cx = c[0] * TILE, cy = c[1] * TILE;
-    if (Math.abs(p.x - cx) < 14 && Math.abs((p.y + p.h) - cy) < 20) respawn = { x: cx + 2, y: cy - 44 };
-  }
-  // switch & door (puzzle beat)
-  if (level.sw && !switchLatch) {
-    const sx = level.sw.x * TILE, sy = level.sw.y * TILE;
-    if (p.x + p.w > sx && p.x < sx + TILE && Math.abs(p.y + p.h - sy) < 8) {
-      switchLatch = true; doorOpen = true; sfx("switch");
+  if (cell) { // pick up / swap (mouse_53 + mouse_56 ports)
+    if (!G.mouseSelObj && G.inventory[cell.k][cell.i]) {
+      G.mouseSelObj = G.inventory[cell.k][cell.i]; G.mouseSelAmt = G.stack[cell.k][cell.i];
+      G.mouseSelPH = cell.i; G.mouseSelPV = cell.k; G.stack[cell.k][cell.i] = 0;
+    } else if (G.mouseSelObj) {
+      const tmpO = G.inventory[cell.k][cell.i], tmpA = G.stack[cell.k][cell.i];
+      G.inventory[cell.k][cell.i] = G.mouseSelObj; G.stack[cell.k][cell.i] = G.mouseSelAmt;
+      G.inventory[G.mouseSelPV][G.mouseSelPH] = tmpO; G.stack[G.mouseSelPV][G.mouseSelPH] = tmpA;
+      G.mouseSelObj = 0; G.mouseSelAmt = 0;
     }
+    return;
   }
-  // shards
-  for (const s of shardsLeft) {
-    if (!s.taken && Math.abs(p.x + 6 - s.x) < 16 && Math.abs(p.y + 22 - s.y) < 26) { s.taken = true; totalShards++; sfx("collect"); }
-  }
-  // hazards: spikes, composite ship spikes, thin air
-  for (const sp of level.spikes) {
-    if (overlap(p, { x: sp[0] * TILE + 2, y: sp[1] * TILE + 9, w: sp[2] * TILE - 4, h: 7 })) return die();
-  }
-  for (const m of movers) if (m.spikeRect && overlap(p, m.spikeRect)) return die();
-  if (p.y > 23 * TILE) return die();
-  // goal
-  const g = level.goal;
-  if (overlap(p, { x: g.x * TILE, y: (g.y - g.h) * TILE, w: g.w * TILE, h: g.h * TILE })) {
-    sfx("goal");
-    if (levelIdx + 1 < LEVELS.length) startFade(() => loadLevel(levelIdx + 1, true));
-    else startFade(() => { state = "win"; });
-  }
-}
-function updateEnemies() {
-  enemies = enemies.filter(e => !e.dead);
-  for (const e of enemies) {
-    e.onGround = OnGround(e); // oParEntity begin step, same as the player
-    e.standingOn = deckBelow(e);
-    if (!e.onGround) e.vy = Approach(e.vy, TUNE.vyMax, TUNE.gravNorm);
-    e.vx = e.dir * 0.7;
-    // turn at ledges and patrol bounds
-    const aheadX = e.dir > 0 ? e.x + e.w + 3 : e.x - 3;
-    const groundAhead = tileSolid(Math.floor(aheadX / TILE), Math.floor((e.y + e.h + 6) / TILE)) ||
-                        level.through.some(p => Math.abs(e.y + e.h + 1 - p[1] * TILE) <= 2 && aheadX > p[0] * TILE && aheadX < (p[0] + p[2]) * TILE);
-    if (!groundAhead && e.onGround) e.dir *= -1;
-    if (e.x < e.min) e.dir = 1; if (e.x > e.max) e.dir = -1;
-    const pvx = e.vx; physMove(e);
-    e.face = e.dir;
-    if ((e.cLeft || e.cRight) && pvx !== 0) e.dir *= -1;
-    e.animT += 0.06;
-    if (player && overlap(player, { x: e.x + 2, y: e.y + 4, w: e.w - 4, h: e.h - 4 })) {
-      // stomp: falling onto a sentry's head bounces and removes him
-      if (player.vy > 1 && (player.y + player.h) - e.y < 16) {
-        e.dead = true; player.vy = -5.5; totalShards += 0; sfx("collect");
-      } else die();
+  if (G.invShow || G.equipShow) return;
+  // world buttons (mouse_4 events): hire crew, fill crew, sword button, item objects
+  const wx = sx + cam.x, wy = sy + cam.y;
+  for (const e of ents) {
+    if (e.dead) continue;
+    const bb = bbox(e); if (wx < bb.l || wx > bb.r || wy < bb.t || wy > bb.b) continue;
+    if (e.type === "objHireCrew") { // objHireCrew/mouse_4.gml
+      if (item_amount(1) >= 10) { if (G.crew < G.max_crew) { item_remove(1, 10); G.crew += 1; showMessage("Hired a crew member. Crew: " + G.crew); } else showMessage("Your ship can only hold " + G.max_crew + " people."); }
+      else showMessage("You do not have enough gold."); return;
     }
+    if (e.type === "objFillCrew") { // objFillCrew/mouse_4.gml
+      const cost = 10 * G.max_crew - 10;
+      if (item_amount(1) >= cost && G.crew < G.max_crew) { item_remove(1, cost); G.crew = G.max_crew; showMessage("You have hired " + (G.max_crew - 1) + " people."); }
+      else showMessage("You do not have enough gold."); return;
+    }
+    if (e.type === "obj_sword_button") { // buys item 6 for 10 dubloons (mouse_4.gml)
+      if (item_amount(1) >= 10) { if (inventory_space() > 0 || item_amount(1) === 10) { item_remove(1, 10); item_add(6, 1); showMessage("Bought a Bomb."); } else showMessage("You do not have enough space."); }
+      else showMessage("You do not have enough gold."); return;
+    }
+    if (e.type === "obj_object") { item_add(e.img | 0, 1); destroy(e); return; }
+    if (e.type === "objRowBoat" && e === vessel) { /* handled by Space below */ }
   }
+  // Rowboat: Space buys the small ship (objRowBoat/keypress_32.gml)
 }
+addEventListener("keydown", e => {
+  if (e.code === "KeyQ") { G.invShow = !G.invShow; G.menuShow = false; if (G.mouseSelObj) { G.inventory[G.mouseSelPV][G.mouseSelPH] = G.mouseSelObj; G.stack[G.mouseSelPV][G.mouseSelPH] = G.mouseSelAmt; G.mouseSelObj = 0; } }
+  if (e.code === "KeyE") { G.equipShow = !G.equipShow; G.menuShow = false; }
+  if (e.code === "KeyC") { walkVariant = (walkVariant + 1) % 3; }
+  if (e.code === "KeyR") { initGame(); }
+  if (e.code === "Enter") { item_add(1, 100); item_add(5, 1); item_add(6, 1); item_add(11, 1); item_add(12, 1); item_add(13, 1); showMessage("Debug grant (obj_control keypress_13)."); } // obj_control/keypress_13.gml
+  if (e.code === "Space" && mode === "ship" && vessel && vessel.kind === "rowboat" && roomName === "rmTravel") {
+    if (item_amount(1) >= 10) { item_remove(1, 10); G.shipnum = 1; destroy(vessel); showMessage("Bought the small ship!"); }
+    else showMessage("You do not have enough gold.");
+  }
+});
 
-/* ---------------- physics probe (?probe=1) ----------------
-   Deterministic measurements of the ported engine, run headlessly:
-   jump apex (full hold vs tap), run stop distance, chimney wall climb,
-   slope-staircase climb, and ship-carry fidelity. Results go in the title. */
-function runProbe() {
-  const results = {};
-  const blank = () => ({ name: "PROBE", sub: "", solids: [[0, 18, 40, 4]], slopes: [],
-    through: [], spikes: [], movers: [], npcs: [], shards: [], enemies: [],
-    start: [2, 18], checkpoints: [], goal: { x: 38, y: 18, w: 1, h: 3 }, door: null, sw: null });
-  function setup(lv, px, py) {
-    level = lv; levelIdx = 0; doorOpen = false; switchLatch = false;
-    movers = lv.movers.map(makeMover); enemies = []; shardsLeft = [];
-    respawn = { x: px, y: py };
-    player = makeEntity(px, py); player.alarm = 0;
-    fadeDir = 0; fade = 0; pendingAction = null; state = "play";
-  }
-  let prevJump = false;
-  function probeStep(inp) {
-    inp.jumpPressed = inp.jump && !prevJump;
-    inp.jumpReleased = !inp.jump && prevJump;
-    prevJump = inp.jump;
-    updatePlayer(inp);
-    updateEnemies();
-    for (const m of movers) m.update();
-    frame++;
-    if (fadeDir) { fadeDir = 0; pendingAction = null; player = makeEntity(respawn.x, respawn.y); }
-  }
-  const idle = () => ({ left: false, right: false, down: false, jump: false, jumpPressed: false, jumpReleased: false });
-  // 1. Full-hold jump apex: vy=-8, g=0.5 -> 8^2/(2*0.5) = 64px
-  setup(blank(), 100, 18 * TILE - 44);
-  let minY = player.y, jumped = false;
-  for (let i = 0; i < 120; i++) {
-    const inp = idle(); inp.jump = true;
-    probeStep(inp);
-    if (player.vy < 0) jumped = true;
-    minY = Math.min(minY, player.y);
-    if (jumped && player.onGround && i > 5) break;
-  }
-  results.jumpApexHold = Math.round((18 * TILE - 44) - minY);
-  // 2. Tap jump apex (release after 1 frame: vy *= 0.25)
-  setup(blank(), 100, 18 * TILE - 44);
-  minY = player.y; jumped = false; prevJump = false;
-  for (let i = 0; i < 120; i++) {
-    const inp = idle(); inp.jump = i === 0;
-    probeStep(inp);
-    if (player.vy < 0) jumped = true;
-    minY = Math.min(minY, player.y);
-    if (jumped && player.onGround && i > 5) break;
-  }
-  results.jumpApexTap = Math.round((18 * TILE - 44) - minY);
-  // 3. Run stop distance: accelerate to vxMax, release, measure slide
-  setup(blank(), 100, 18 * TILE - 44);
-  for (let i = 0; i < 60; i++) { const inp = idle(); inp.right = true; probeStep(inp); }
-  const stopX0 = player.x;
-  for (let i = 0; i < 60; i++) { probeStep(idle()); if (Math.abs(player.vx) < 0.01) break; }
-  results.stopDistance = Math.round(player.x - stopX0);
-  results.runSpeed = Math.round(6.5 * 60); // px/s at vxMax 6.5 px/frame
-  // 4. Chimney wall climb: 3-tile-wide shaft, 7 tiles tall
-  const chim = blank();
-  chim.solids = [[0, 18, 40, 4], [15, 11, 1, 7], [19, 11, 1, 7]];
-  setup(chim, 16 * TILE + 6, 18 * TILE - 44);
-  minY = player.y; prevJump = false;
-  // wall jumps need a FRESH press (keyboard_check_pressed), then a HOLD —
-  // release the frame after the press and the variable jump cuts vy to a
-  // quarter. So: press on a new wall contact, hold 8 frames, then release.
-  // steer persists across the whole flight: after jumping off one wall,
-  // steer toward the other — air friction alone will not carry you there.
-  let lastWall = null, jumpedOffGround = false, jumpHold = 0, steer = "right";
-  for (let i = 0; i < 600; i++) {
-    const inp = idle();
-    const wall = player.cLeft ? "L" : player.cRight ? "R" : null;
-    if (!player.onGround && wall && wall !== lastWall) { jumpHold = 8; steer = wall === "L" ? "right" : "left"; }
-    if (jumpHold > 0) { inp.jump = true; jumpHold--; }
-    if (!player.onGround && wall) { inp.left = wall === "L"; inp.right = wall === "R"; }
-    else if (player.onGround && !jumpedOffGround) { inp.right = true; inp.jump = true; jumpedOffGround = true; jumpHold = 8; steer = "left"; }
-    else if (player.onGround) { inp.right = true; }
-    else { inp.left = steer === "left"; inp.right = steer === "right"; }
-    lastWall = wall;
-    probeStep(inp);
-    minY = Math.min(minY, player.y);
-    if (minY <= (18 * TILE - 44) - 112) break; // climbed the full 7-tile shaft
-  }
-  results.wallClimbHeight = Math.round((18 * TILE - 44) - minY);
-  results.wallClimbReachedTop = minY <= (18 * TILE - 44) - 112;
-  // 5. Slope staircase (Isle One, L1): drive with demoInput EXACTLY as the
-  // live loop does (step() hands demoInput's edges straight to updatePlayer —
-  // recomputing them here would cut every jump to a tap).
-  level = LEVELS[0]; loadLevel(0);
-  let maxX = player.x;
-  for (let i = 0; i < 600; i++) {
-    const inp = demoInput();
-    updatePlayer(inp); updateEnemies();
-    for (const m of movers) m.update();
-    frame++;
-    maxX = Math.max(maxX, player.x);
-    if (fadeDir) break; // died — stop, the measurement is the distance reached
-    if (player.x > 24 * TILE) break; // past the staircase onto the second isle
-  }
-  results.slopeClimbX = Math.round(maxX);
-  results.slopeClimbPassed = maxX > 24 * TILE;
-  // 6. Ship carry: stand on the Isle One mover, no input, 180 frames
-  level = LEVELS[0]; loadLevel(0);
-  const mv = movers[0], d0 = mv.deck();
-  player = makeEntity(d0.x + 4, d0.y - 44); player.standingOn = mv;
-  const px0 = player.x, dx0 = d0.x;
-  results.carryTrace = [];
-  for (let i = 0; i < 180; i++) {
-    probeStep(idle());
-    if (i < 12 || i % 30 === 0) results.carryTrace.push([i, Math.round(player.x), Math.round(mv.deck().x), player.standingOn === mv, player.onGround, Math.round(player.y)]);
-  }
-  results.carryPlayerDx = Math.round(player.x - px0);
-  results.carryDeckDx = Math.round(mv.deck().x - dx0);
-  results.carryMatches = Math.abs((player.x - px0) - (mv.deck().x - dx0)) <= 2;
-  results.stillStandingOnDeck = player.standingOn === mv || player.onGround;
-  return results;
-}
-
-/* ---------------- rendering ---------------- */
-function drawSprite(img, x, y, flip) {
-  if (!img) return;
-  ctx.save();
-  if (flip) { ctx.translate(Math.round(x) + img.width, Math.round(y)); ctx.scale(-1, 1); ctx.drawImage(img, 0, 0); }
-  else ctx.drawImage(img, Math.round(x), Math.round(y));
+/* ---------- drawing ---------- */
+function drawSprite(name, idx, x, y, xs, ys, ang, alpha) {
+  const img = sprImg(name, idx); if (!img || !img.complete || !img.naturalWidth) return;
+  const m = SPR(name); if (!m) return;
+  ctx.save(); ctx.globalAlpha = alpha === undefined ? 1 : alpha;
+  ctx.translate(Math.round(x - cam.x), Math.round(y - cam.y));
+  if (ang) ctx.rotate(ang * Math.PI / 180);
+  ctx.scale(xs || 1, ys || 1);
+  ctx.drawImage(img, -m.ox, -m.oy);
   ctx.restore();
 }
-function drawFigure(imgStrip, e, isPlayer) {
-  // strip: 8 frames of 24x48; idle uses player_idle when still
-  const moving = Math.abs(e.vx) > 0.4 && e.onGround;
-  ctx.save();
-  const dx = Math.round(e.x - 6 - camX), dy = Math.round(e.y - 4);
-  if (!e.onGround || moving) {
-    const frameIdx = moving ? Math.floor(e.animT) % 8 : 1;
-    ctx.translate(dx + (e.face < 0 ? 24 : 0), dy);
-    ctx.scale(e.face < 0 ? -1 : 1, 1);
-    if (imgStrip) ctx.drawImage(imgStrip, frameIdx * 24, 0, 24, 48, 0, 0, 24, 48);
-  } else if (isPlayer && IMG.player_idle) {
-    ctx.translate(dx + (e.face < 0 ? 24 : 0), dy + 4);
-    ctx.scale(e.face < 0 ? -1 : 1, 1);
-    ctx.drawImage(IMG.player_idle, 0, 0);
-  } else if (imgStrip) {
-    ctx.translate(dx + (e.face < 0 ? 24 : 0), dy);
-    ctx.scale(e.face < 0 ? -1 : 1, 1);
-    ctx.drawImage(imgStrip, 24, 0, 24, 48, 0, 0, 24, 48);
-  }
-  ctx.restore();
+function drawText(txt, x, y, color, size, align) {
+  ctx.fillStyle = color || "#fff"; ctx.font = (size || 12) + "px monospace"; ctx.textAlign = align || "left";
+  String(txt).split("\n").forEach((ln, i) => ctx.fillText(ln, x, y + i * ((size || 12) + 3)));
 }
-function drawIslandRect(s) {
-  const x = s[0] * TILE - camX, y = s[1] * TILE, w = s[2] * TILE, h = s[3] * TILE;
-  if (x + w < 0 || x > W) return;
-  ctx.fillStyle = "#0b0b0d"; ctx.fillRect(x, y, w, h);
-  ctx.fillStyle = "#33333a"; ctx.fillRect(x, y, w, 2); // lit top edge
-  // jagged rock underside on exposed bottom tiles (tileset look)
-  ctx.fillStyle = "#0b0b0d";
-  for (let tx = s[0]; tx < s[0] + s[2]; tx++) {
-    if (!tileSolid(tx, s[1] + s[3])) {
-      const bx = tx * TILE - camX, by = (s[1] + s[3]) * TILE;
-      const jag = ((tx * 37 + s[1] * 11) % 3) * 3;
-      ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx + TILE, by); ctx.lineTo(bx + TILE / 2, by + 6 + jag); ctx.closePath(); ctx.fill();
-    }
-  }
-}
-function drawBackground() {
-  const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, "#45454e"); g.addColorStop(0.55, "#33333a"); g.addColorStop(1, "#232329");
-  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-  // distant islands (parallax silhouettes)
-  ctx.fillStyle = "rgba(16,16,19,0.55)";
-  for (let i = 0; i < 7; i++) {
-    const ix = ((i * 260 - camX * 0.3) % (W + 300)) - 150, iy = 60 + (i * 53) % 150;
-    ctx.beginPath(); ctx.moveTo(ix, iy); ctx.lineTo(ix + 90, iy); ctx.lineTo(ix + 60, iy + 26); ctx.lineTo(ix + 30, iy + 26); ctx.closePath(); ctx.fill();
-  }
-  // distant drifting ships
-  const ships = [["ship_white_small", 0.12, 70], ["ship_red_small", 0.2, 150], ["sloop_red", 0.16, 105]];
-  ships.forEach(([n, par, sy], i) => {
-    const im = IMG[n]; if (!im) return;
-    const sx = ((frame * 0.11 * (i + 1) - camX * par) % (W + 200)) - 100;
-    ctx.globalAlpha = 0.75; ctx.drawImage(im, sx, sy + Math.sin(frame * 0.01 + i * 2) * 3); ctx.globalAlpha = 1;
-  });
-  // thin-air mist at the bottom of the world
-  const mg = ctx.createLinearGradient(0, H - 42, 0, H);
-  mg.addColorStop(0, "rgba(210,210,220,0)"); mg.addColorStop(1, "rgba(210,210,220,0.20)");
-  ctx.fillStyle = mg; ctx.fillRect(0, H - 42, W, 42);
-}
-function drawLevel() {
-  drawBackground();
-  for (const s of level.solids) drawIslandRect(s);
-  // slopes: black rock ramps
-  for (const s of level.slopes) {
-    const x = s[0] * TILE - camX, y = s[1] * TILE;
-    ctx.fillStyle = "#0b0b0d"; ctx.beginPath();
-    if (s[2] === "/") { ctx.moveTo(x, y + TILE); ctx.lineTo(x + TILE, y); ctx.lineTo(x + TILE, y + TILE); }
-    else { ctx.moveTo(x, y); ctx.lineTo(x + TILE, y + TILE); ctx.lineTo(x, y + TILE); }
-    ctx.closePath(); ctx.fill();
-    ctx.strokeStyle = "#33333a"; ctx.beginPath();
-    if (s[2] === "/") { ctx.moveTo(x, y + TILE); ctx.lineTo(x + TILE, y); } else { ctx.moveTo(x, y); ctx.lineTo(x + TILE, y + TILE); }
-    ctx.stroke();
-  }
-  // jump-through docks
-  for (const p of level.through) {
-    const x = p[0] * TILE - camX, y = p[1] * TILE;
-    ctx.fillStyle = "#151312"; ctx.fillRect(x, y, p[2] * TILE, 5);
-    ctx.fillStyle = "#4a3b28"; ctx.fillRect(x, y, p[2] * TILE, 2);
-    for (let i = 0; i < p[2]; i++) ctx.fillRect(x + i * TILE + 7, y + 5, 2, 6);
-  }
-  // door + switch
-  if (level.door && !doorOpen) {
-    const d = level.door, x = d[0] * TILE - camX, y = d[1] * TILE;
-    ctx.fillStyle = "#1c1c20"; ctx.fillRect(x, y, d[2] * TILE, d[3] * TILE);
-    ctx.fillStyle = "#c22"; ctx.fillRect(x, y + 4, d[2] * TILE, 3);
-    ctx.strokeStyle = "#55555e"; ctx.strokeRect(x + 0.5, y + 0.5, d[2] * TILE - 1, d[3] * TILE - 1);
-  }
-  if (level.sw) {
-    const x = level.sw.x * TILE - camX, y = level.sw.y * TILE;
-    ctx.fillStyle = switchLatch ? "#3a3" : "#c22"; ctx.fillRect(x + 3, y - 4, 10, 4);
-    ctx.fillStyle = "#0b0b0d"; ctx.fillRect(x + 2, y - 1, 12, 2);
-  }
-  // spikes
-  ctx.fillStyle = "#d8d8de";
-  for (const sp of level.spikes) {
-    const x = sp[0] * TILE - camX, y = sp[1] * TILE;
-    for (let i = 0; i < sp[2] * 2; i++) {
-      ctx.beginPath(); ctx.moveTo(x + i * 8, y + TILE); ctx.lineTo(x + i * 8 + 4, y + 6); ctx.lineTo(x + i * 8 + 8, y + TILE); ctx.closePath(); ctx.fill();
-    }
-  }
-  // checkpoints (little harbour flags)
-  for (const c of level.checkpoints) {
-    const x = c[0] * TILE - camX, y = c[1] * TILE, active = respawn.x === c[0] * TILE + 2;
-    ctx.fillStyle = "#0b0b0d"; ctx.fillRect(x + 7, y - 22, 2, 22);
-    ctx.fillStyle = active ? "#e33" : "#888"; ctx.fillRect(x + 9, y - 22, 9, 6);
-  }
-  // movers: airships with decks, composite spikes riding (Pt 4)
-  for (const m of movers) {
-    const d = m.deck(), x = d.x - camX;
-    const im = IMG[m.def.ship === "red" ? "ship_red_small" : "ship_white_small"];
-    if (im) ctx.drawImage(im, Math.round(x + d.w / 2 - im.width / 2), Math.round(d.y - 40));
-    ctx.fillStyle = "#151312"; ctx.fillRect(x, d.y, d.w, 5);
-    ctx.fillStyle = "#4a3b28"; ctx.fillRect(x, d.y, d.w, 2);
-    if (m.spikeRect) {
-      ctx.fillStyle = "#d8d8de";
-      for (let i = 0; i < 2; i++) {
-        const sx = m.spikeRect.x - camX + i * 10;
-        ctx.beginPath(); ctx.moveTo(sx, d.y); ctx.lineTo(sx + 5, d.y - 8); ctx.lineTo(sx + 10, d.y); ctx.closePath(); ctx.fill();
+const SKIP_DRAW = ["objEnemyPar", "objProjectilePar", "objEnemyProjectile", "objPickUpPar", "objTradePar", "obj_control", "object32", "objBlock16", "objBlock32"];
+function drawEnt(e) {
+  if (e.visible === false) return; // object.json visible:false (blocks, object16, objtakeOff) — invisible in the original; draw-only, physics untouched
+  if (SKIP_DRAW.includes(e.type)) return; // parents are abstract
+  switch (e.type) {
+    case "objPlayer": {
+      let spr, idx = 0;
+      if (e.pickUp) { spr = "sprPlayerPickUp"; }
+      else if (e.isInAir) spr = e.vspd < 0 ? "sprPlayerJump" : "sprPlayerFall";
+      else if (e.isMoving) { spr = ["sprPlayer", "sprPlayer1", "sprPlayer2"][walkVariant]; idx = e.img; }
+      else spr = "sprPlayerIdle";
+      drawSprite(spr, idx, e.x, e.y, e.dir, 1, 0, 1);
+      if (e.takeOff === 1 && !e.isInAir) { drawSprite("spr_takeoff", 0, e.x, e.y - 32, 1, 1, 0, 1); }
+      const pad = nearest(e.x, e.y, ["objtakeOff"], e);
+      if (pad && dist(e, pad) <= 32 && !e.isInAir) {
+        drawText("Take-off", e.x - cam.x + 16, e.y - cam.y - 64, "#fff", 11);
+        drawSprite("spr_takeoff", 0, e.x, e.y - 56, 1, 1, 0, 1);
+        drawText("Stay here", e.x - cam.x + 16, e.y - cam.y + 16, "#fff", 11);
       }
-      ctx.fillStyle = "#c22"; ctx.fillRect(m.spikeRect.x - camX, d.y - 2, m.spikeRect.w, 2);
+      const pk = nearest(e.x, e.y, ["objPickUpPar", "objFlowerPatch", "objSkybloomPatch", "objSalvage", "objSkull", "objskullTake"], e);
+      if (pk && dist(e, pk) <= 24) drawText("Examine (S)", e.x - cam.x + 16, e.y - cam.y + 16, "#fff", 11);
+      break;
     }
+    case "objShip": {
+      const dmg = G.hp < G.max_hp;
+      if (!dmg) drawSprite("sprShip", e.img, e.x, e.y, e.dir, 1, e.angle, 1);
+      else drawSprite("sprShipDmg", Math.min(3, Math.floor((1 - G.hp / G.max_hp) * 4)), e.x, e.y, e.dir, 1, e.angle, 1);
+      break;
+    }
+    case "objShip1": drawSprite("sprSBoat", 0, e.x, e.y, e.dir, 1, e.angle, 1); break;
+    case "objRowBoat": drawSprite("sprRowBoat", e.img, e.x, e.y, e.dir, 1, e.angle, 1); break;
+    case "objEnemyBomber": drawSprite("sprEnemyBomber", e.img, e.x, e.y, Math.cos(e.ang * Math.PI / 180) >= 0 ? -1 : 1, 1, 0, 1); break;
+    case "objSmlBoat": drawSprite("sprSmlBoat", 0, e.x, e.y, Math.cos(e.ang * Math.PI / 180) >= 0 ? -1 : 1, 1, 0, 1); break;
+    case "objCrewBullet": case "objECrewBullet": drawSprite("sprCrewBullet", 0, e.x, e.y, 0.5, 0.5, 0, 1); break;
+    case "objBullet": case "objBullet2": case "objEBullet": drawSprite("sprCannonBullet", 0, e.x, e.y, 1, 1, 0, 1); break;
+    case "objRearBullet": drawSprite("sprCannonBullet", 0, e.x, e.y, 1, 1, 0, 1); break;
+    case "objBomb": drawSprite("sprBomb", e.img, e.x, e.y, 1, 1, e.angle, 1); break;
+    case "objEBomb": drawSprite("sprite51", e.img, e.x, e.y, 1, 1, e.angle, 1); break;
+    case "objBlast": drawSprite("sprBlast", e.img, e.x, e.y, 1, 1, 0, 1); break;
+    case "objSMLBlast": case "objESmlBlast": drawSprite("sprsmallBlast", e.img, e.x, e.y, 2, 2, 0, 1); break;
+    case "objGold": drawSprite("sprGold", e.img, e.x, e.y, 1, 1, 0, 1); break;
+    case "objDebris": drawSprite("sprDebris", e.img, e.x, e.y, 1, 1, e.angle, 1); break;
+    case "objShrapnel": drawSprite("sprShrapnel", 0, e.x, e.y, 1, 1, e.angle, 1); break;
+    case "objCrew": drawSprite("sprCrew", 0, e.x, e.y, 1, 1, e.angle, 1); break;
+    case "objShadow": drawSprite("sprShadow", 0, e.x, e.y, 1, 1, 0, e.alpha); break;
+    case "objBoatPreview": drawSprite("sprBoatPrev", G.shipnum, e.x, e.y, 1, 1, 0, 1); break;
+    case "objtakeOff": drawSprite("spr_takeoff", 0, e.x, e.y, 1, 1, 0, 1); break;
+    case "objHireCrew": {
+      const near = player && dist(e, player) <= 32;
+      drawSprite("sprite53", 0, e.x, e.y, 1, 1, 0, near ? 1 : 0.55);
+      if (near) drawText("Current crew: " + G.crew + "/" + G.max_crew + " — click to hire (10 dubloons)", e.x - cam.x, e.y - cam.y - 20, "#fff", 11);
+      break;
+    }
+    case "objFillCrew": drawSprite("sprite54", 0, e.x, e.y, 1, 1, 0, 0.8); break;
+    case "obj_sword_button": drawSprite("spr_sword_button", 0, e.x, e.y, 1, 1, 0, 1); break;
+    case "obj_object": drawSprite("spr_inventory_obj", e.img | 0, e.x, e.y, 1, 1, 0, 1); break;
+    case "objSkull": drawSprite("sprite34", 0, e.x, e.y, 1, 1, 0, 1); break;
+    case "objskullTake": case "objskullLess": drawSprite("sprSkele", e.img | 0, e.x, e.y, 1, 1, 0, 1); break;
+    case "objFlowerPatch": case "obj_flowers": drawSprite("sprite24", 0, e.x, e.y, 1, 1, 0, 1); break;
+    case "objCrate": drawSprite("sprCrate", 0, e.x, e.y, 1, 1, 0, 1); break;
+    case "objDock": case "objDock2": case "objDock3": case "objEnemyDock": case "objDock4": case "objDock5": drawSprite("sprDock", 0, e.x, e.y, 1, 1, 0, 1); break;
+    case "objSkybloomPatch": drawSprite("sprSkybloom", 0, e.x, e.y, 1, 1, 0, 1); break;
+    case "objSalvage": drawSprite("sprSalvage", 0, e.x, e.y, 1, 1, 0, 1); break;
+    default:
+      if (NPC_TYPES.includes(e.type)) {
+        if (e.type === "obj_harbormaster") drawSprite("sprHarbormaster", 0, e.x, e.y, 1, 1, 0, 1); // EXPANSION body (other NPCs are bubble-only in the port)
+        if (e.type === "obj_gardener") drawSprite("sprGardener", 0, e.x, e.y, 1, 1, 0, 1);
+        drawSprite("spr_speech", Math.min(2, e.t), e.x, e.y - 8, 1, 1, 0, 0.9);
+        const lines = WORLD.texts[e.type] || [];
+        if (e.t >= 1 && e.t <= lines.length && player && dist(e, player) <= 64) {
+          ctx.fillStyle = "rgba(0,0,0,0.55)"; const w = 260, h = 16 + lines[e.t - 1].split("\n").length * 14;
+          ctx.fillRect(e.x - cam.x - 8, e.y - cam.y - 62 - h, w, h);
+          drawText(lines[e.t - 1], e.x - cam.x, e.y - cam.y - 48 - h, "#fff", 11);
+          drawText("(S)", e.x - cam.x + w - 28, e.y - cam.y - 66 - h + 12, "#ff8", 10);
+        }
+      } else if (e.spr) drawSprite(e.spr, e.img, e.x, e.y, e.xscale, e.yscale, e.angle, e.alpha);
   }
-  // goal: the anchored great ship + boarding glow
-  const g = level.goal, gx = g.x * TILE - camX, gy = g.y * TILE;
-  const hero = IMG.ship_anchor || IMG.ship_white_large;
-  if (hero && levelIdx === LEVELS.length - 1) ctx.drawImage(hero, gx - 60, gy - 250, hero.width * 0.82, hero.height * 0.82);
-  else if (IMG.ship_white) ctx.drawImage(IMG.ship_white, gx - 46, gy - 108, 108, 95);
-  ctx.fillStyle = "rgba(255,60,60," + (0.25 + Math.sin(frame * 0.08) * 0.12) + ")";
-  ctx.fillRect(gx, gy - g.h * TILE, g.w * TILE, g.h * TILE);
-  ctx.fillStyle = "#fff"; ctx.font = "8px monospace"; ctx.fillText("BOARD", gx + 2, gy - g.h * TILE - 4);
-  // shards: miniature compass roses
-  for (const s of shardsLeft) {
-    if (s.taken) continue;
-    const bob = Math.sin(frame * 0.06 + s.x) * 2;
-    if (IMG.compass) ctx.drawImage(IMG.compass, s.x - camX - 8, s.y + bob - 8, 16, 16);
-    else { ctx.fillStyle = "#e33"; ctx.fillRect(s.x - camX - 3, s.y + bob - 3, 6, 6); }
+}
+let tilesBuilt = -1;
+function buildTiles() {
+  const R = WORLD.rooms[roomName]; if (!R) return;
+  tileCanvas = document.createElement("canvas"); tileCanvas.width = R.w; tileCanvas.height = R.h;
+  const tc = tileCanvas.getContext("2d"); let drawn = 0;
+  for (const [x, y, bg, tx, ty, w, h] of [...R.tiles].sort((a, b) => b[7] - a[7])) {
+    const img = BGIMG[bg]; if (img && img.complete && img.naturalWidth) { tc.drawImage(img, tx, ty, w, h, x, y, w, h); drawn++; }
   }
-  // NPCs + dialogue
-  let dlg = null;
-  for (const n of level.npcs) {
-    const im = IMG[n.img]; if (!im) continue;
-    const nx = n.x * TILE - camX, ny = n.y * TILE;
-    ctx.drawImage(im, Math.round(nx + 2), Math.round(ny - im.height));
-    if (player && Math.abs(player.x - n.x * TILE) < 42 && Math.abs(player.y + player.h - ny) < 26) dlg = n.line;
+  tilesBuilt = drawn;
+  // Block instances are NOT drawn: objBlock16/objBlock32 are visible:false in
+  // the original (magenta placeholder sprites smlBlock/bigBlock) — they are
+  // collision only, and the tile layer above is the visible terrain.
+}
+function bgr(c) { return "rgb(" + (c & 0xFF) + "," + ((c >> 8) & 0xFF) + "," + ((c >> 16) & 0xFF) + ")"; }
+function render() {
+  if (CLOSEUP) { drawCloseup(); return; }
+  const R = WORLD.rooms[roomName]; if (!R) return;
+  ctx.fillStyle = bgr(R.color); ctx.fillRect(0, 0, VW, VH);
+  const bg5 = BGIMG.background5;
+  if (bg5 && bg5.complete && bg5.naturalWidth) { // room background 0 = background5 (index 5)
+    if (roomName === "rmTravel") { const ox = -(cam.x % 1000), oy = -(cam.y % 1000); for (let x = ox; x < VW; x += 1000) for (let y = oy; y < VH; y += 1000) ctx.drawImage(bg5, x, y); }
+    else ctx.drawImage(bg5, 0, 0, VW, VH);
   }
-  for (const e of enemies) drawFigure(IMG.rebel_walk, e, false);
-  if (player) drawFigure(IMG.player_walk, player, true);
-  if (navigator.maxTouchPoints > 0) {
-    ctx.fillStyle = "rgba(255,255,255,0.10)";
-    ctx.fillRect(0, H - 56, 120, 56); ctx.fillRect(136, H - 56, 120, 56); ctx.fillRect(W - 150, H - 56, 150, 56);
-    ctx.fillStyle = "rgba(255,255,255,0.65)"; ctx.font = "16px monospace";
-    ctx.fillText("◀", 52, H - 22); ctx.fillText("▶", 188, H - 22); ctx.fillText("JUMP", W - 108, H - 22);
-  }
-  if (dlg) {
-    ctx.fillStyle = "rgba(8,8,10,0.88)"; ctx.fillRect(70, H - 44, W - 140, 30);
-    ctx.strokeStyle = "#c22"; ctx.strokeRect(70.5, H - 43.5, W - 140, 30);
-    ctx.fillStyle = "#eee"; ctx.font = "10px monospace";
-    wrapText(dlg, 80, H - 30, W - 160, 12);
-  }
+  if (!tileCanvas || tilesBuilt < R.tiles.length) buildTiles();
+  if (tileCanvas) ctx.drawImage(tileCanvas, cam.x, cam.y, VW, VH, 0, 0, VW, VH);
+  const sorted = [...ents].filter(e => !e.dead).sort((a, b) => b.depth - a.depth);
+  for (const e of sorted) drawEnt(e);
   drawHUD();
-}
-function wrapText(text, x, y, maxW, lh) {
-  const words = text.split(" "); let line = "", yy = y;
-  for (const w of words) {
-    if (ctx.measureText(line + w).width > maxW) { ctx.fillText(line, x, yy); line = ""; yy += lh; }
-    line += w + " ";
-  }
-  ctx.fillText(line, x, yy);
+  if (!started && !TEST && (!SHOT || SHOT === "title")) drawTitle();
+  if (gameOver) { ctx.fillStyle = "rgba(0,0,0,0.7)"; ctx.fillRect(0, 0, VW, VH); drawText("THE MYST CLAIMS ANOTHER SHIP", 150, 220, "#f66", 20); drawText("Press R to restart", 240, 260, "#fff", 13); }
 }
 function drawHUD() {
-  ctx.fillStyle = "rgba(8,8,10,0.55)"; ctx.fillRect(0, 0, W, 20);
-  ctx.fillStyle = "#eee"; ctx.font = "10px monospace";
-  ctx.fillText(level.name, 8, 13); // Pt 1: room name in the corner
-  if (IMG.compass) ctx.drawImage(IMG.compass, W - 120, 3, 14, 14);
-  const secs = Math.floor(timerFrames / 60), mm = String(Math.floor(secs / 60)).padStart(2, "0"), ss = String(secs % 60).padStart(2, "0");
-  ctx.fillText("x " + totalShards, W - 102, 13);
-  ctx.fillText(mm + ":" + ss, W - 62, 13);
-  ctx.fillStyle = "#e66"; ctx.fillText("†" + deaths, W - 26, 13);
+  const band = bandAt(roomName, (mode === "ship" && vessel) ? vessel.y : (player ? player.y : 0));
+  ctx.fillStyle = "rgba(0,0,0,0.45)"; ctx.fillRect(0, 0, VW, 22);
+  drawText(roomName + "   " + band.name, 8, 15, band.name === "THIN AIR" ? "#9cf" : band.name === "THICK AIR" ? "#fc9" : "#cfc", 12);
+  drawText("Dubloons: " + item_amount(1) + "   Crew: " + G.crew + "/" + G.max_crew + "   HP: " + Math.ceil(G.hp) + "/" + G.max_hp, 300, 15, "#fff", 12);
+  if (keys.KeyF) { const c = sprImg("sprCompass", 0); if (c && c.complete) ctx.drawImage(c, 552, 40); drawText("COMPASS", 566, 140, "#fff", 10); if (G.mapMarked) { drawText("GARDEN ISLE — low, THICK AIR", 380, 158, "#fc9", 10); drawText("THE DERELICT — high, THIN AIR", 380, 172, "#9cf", 10); } }
+  if (G.invShow) { // obj_control draw_0 inventory port
+    const panel = sprImg("spr_inventory", 0); if (panel && panel.complete) ctx.drawImage(panel, 0, 7);
+    for (let k = 0; k < G.invH; k++) for (let i = 0; i < G.invW; i++) {
+      const id = G.inventory[k][i]; if (!id) continue;
+      const im = sprImg("spr_inventory_obj", id); if (im && im.complete) ctx.drawImage(im, 7 + i * 32, 11 + k * 33);
+      if (ITEMS.type[id] === "stackable") drawText(G.stack[k][i], 7 + i * 32 + 24, 11 + k * 33 + 10, "#000", 10, "right");
+      if (mouseX >= 7 + i * 32 && mouseX < 7 + i * 32 + 32 && mouseY >= 11 + k * 33 && mouseY < 11 + k * 33 + 32) drawText(ITEMS.name[id], 128, 87, "#fff", 11);
+    }
+    if (G.mouseSelObj) { const im = sprImg("spr_inventory_obj", G.mouseSelObj); if (im && im.complete) ctx.drawImage(im, mouseX - 16, mouseY - 16); }
+  }
+  if (G.equipShow) {
+    const panel = sprImg("spr_equip", 0); if (panel && panel.complete) ctx.drawImage(panel, 228, 0);
+    for (let j = 0; j < 2; j++) { const im = sprImg("spr_inventory_obj", G.equip[j]); if (im && im.complete) ctx.drawImage(im, 232 + j * 34, 32); }
+    drawText("Attack : " + G.base_attack + "+" + (ITEMS.atk[G.equip[0]] || 0) + " = " + G.atk, 320, 335, "#fff", 11);
+    drawText("Defense : " + G.base_defense + "+" + (ITEMS.def[G.equip[1]] || 0) + " = " + G.def, 320, 351, "#fff", 11);
+    if (vessel) { drawText("Crew: " + G.crew, vessel.x - cam.x, vessel.y - cam.y + 48, "#fff", 11); drawText("Ship status: " + Math.ceil(G.hp) + "/" + G.max_hp, vessel.x - cam.x, vessel.y - cam.y + 64, "#fff", 11); }
+  }
+  if (G.menuShow) {
+    ctx.fillStyle = "#888"; ctx.fillRect(G.menuX, G.menuY, 64, G.menu.length * 15 + 1);
+    ctx.strokeStyle = "#000"; ctx.strokeRect(G.menuX, G.menuY, 64, G.menu.length * 15 + 1);
+    G.menu.forEach((m, i) => drawText(m, G.menuX + 3, G.menuY + 12 + i * 15, mouseY >= G.menuY + i * 15 && mouseY < G.menuY + i * 15 + 16 && mouseX >= G.menuX && mouseX < G.menuX + 64 ? "#fff" : "#000", 11));
+  }
+  if (toastT > 0) { ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(70, VH - 34, VW - 140, 24); drawText(toast, VW / 2, VH - 17, "#ff8", 12, "center"); }
 }
 function drawTitle() {
-  drawBackground();
-  if (IMG.ship_anchor) ctx.drawImage(IMG.ship_anchor, W - 300, 58);
-  if (IMG.compass) {
-    ctx.save(); ctx.translate(516, 296); ctx.rotate(frame * 0.01);
-    ctx.drawImage(IMG.compass, -32, -32, 64, 64); ctx.restore();
-  }
-  ctx.fillStyle = "#f2f2f2"; ctx.font = "bold 44px monospace"; ctx.fillText("SKYMYST", 36, 96);
-  ctx.fillStyle = "#e33"; ctx.font = "bold 15px monospace"; ctx.fillText("T H I N   A I R", 38, 122);
-  ctx.fillStyle = "#ddd"; ctx.font = "11px monospace";
-  ctx.fillText("A one-prompt platformer in the Stable Atmosphere.", 38, 168);
-  ctx.fillText("Carry the last dispatch across three floating isles", 38, 186);
-  ctx.fillText("to the great white ship. The Rebels sail red.", 38, 202);
-  ctx.fillStyle = "#fff"; ctx.font = "12px monospace";
-  ctx.fillText((Math.floor(frame / 30) % 2 ? "—  CLICK  HERE,  OR  PRESS  Z,  TO  SET  SAIL  —" : ""), 38, 248);
-  ctx.fillStyle = "#aaa"; ctx.font = "10px monospace";
-  ctx.fillText("Move: Arrows / A,D · Jump: Z / Space (hold = higher, tap walls to climb)", 38, 286);
-  ctx.fillText("Gamepad works too. R restarts an isle · - / + hop isles · Esc = title", 38, 302);
-  ctx.fillText("White sails: Alliance · Red sails: Rebels · Below: Thin Air. Do not fall.", 38, 318);
-}
-function drawWin() {
-  drawBackground();
-  if (IMG.ship_white_large) ctx.drawImage(IMG.ship_white_large, W / 2 - 130, 30);
-  ctx.fillStyle = "#f2f2f2"; ctx.font = "bold 24px monospace"; ctx.textAlign = "center";
-  ctx.fillText("DISPATCH DELIVERED", W / 2, 300 - 24);
-  ctx.font = "12px monospace"; ctx.fillStyle = "#ddd";
-  const secs = Math.floor(timerFrames / 60);
-  ctx.fillText("Time " + Math.floor(secs / 60) + ":" + String(secs % 60).padStart(2, "0") + " · Compass shards " + totalShards + " / 15 · Falls " + deaths, W / 2, 300);
-  ctx.fillText("Press Z to sail again — come build on make.fun", W / 2, 322);
-  ctx.textAlign = "left";
+  ctx.fillStyle = "rgba(8,8,20,0.82)"; ctx.fillRect(0, 0, VW, VH);
+  drawText("SKYMYST", 198, 120, "#9cf", 44);
+  drawText("— ORIGINAL WORLD —", 218, 152, "#fff", 16);
+  drawText("A port + expansion of the GameMaker 8 prototype (SkyDemo.exe)", 92, 186, "#ccc", 12);
+  drawText("SHIP:  W A S D sail · CTRL fire (equip a cannon first: Q, right-click it, Equip)", 62, 232, "#fff", 12);
+  drawText("FOOT:  A D move · CTRL / SPACE jump · S examine & pick up · W take-off at pads", 62, 254, "#fff", 12);
+  drawText("Q inventory · E equipment · F compass · R restart · dock the ship to explore isles", 62, 276, "#fff", 12);
+  drawText("Mind the air: THICK below, STABLE mid-sky, THIN above.", 118, 298, "#fc9", 12);
+  drawText("New isles: the Garden low in the Thick, the Derelict high in the Thin — ask the harbormaster at the port.", 30, 318, "#cfc", 11);
+  const s = sprImg("sprShip", 0); if (s && s.complete) ctx.drawImage(s, 290, 330);
+  drawText("click or press any key", 238, 440, "#ff8", 13);
 }
 
-/* ---------------- main loop (oGame step event) ---------------- */
-let last = 0, acc = 0;
-function step() {
-  frame++;
-  // fades (Pt 5 room transitions)
-  if (fadeDir === 1) { fade += 0.06; if (fade >= 1) { fade = 1; if (pendingAction) { pendingAction(); pendingAction = null; } fadeDir = -1; } }
-  else if (fadeDir === -1) { fade -= 0.06; if (fade <= 0) { fade = 0; fadeDir = 0; } }
-  const inp = readInput();
-  if (state === "title") {
-    if (inp.jumpPressed || keys.Enter) { initAudio(); state = "play"; timerFrames = 0; deaths = 0; totalShards = 0; loadLevel(0); }
-    return;
-  }
-  if (state === "win") {
-    if (inp.jumpPressed) { state = "title"; }
-    return;
-  }
-  // oGame debug traversal (Pt 1)
-  if (keys.KeyR && !fadeDir) { startFade(() => loadLevel(levelIdx, true)); keys.KeyR = false; }
-  if (keys.Escape) { state = "title"; keys.Escape = false; }
-  if (keys.Minus && levelIdx > 0 && !fadeDir) { startFade(() => loadLevel(levelIdx - 1, true)); keys.Minus = false; }
-  if (keys.Equal && levelIdx < LEVELS.length - 1 && !fadeDir) { startFade(() => loadLevel(levelIdx + 1, true)); keys.Equal = false; }
-  const useInp = (demoMode || DEMO) ? demoInput() : inp;
-  updatePlayer(useInp);   // oPlayer step event
-  updateEnemies();        // enemy step events
-  for (const m of movers) m.update(); // moving platforms move in their end step (Pt 3/4)
-  timerFrames++;
-  camX = clamp(player.x + player.w / 2 - W / 2, 0, Math.max(0, levelWidth() - W));
+/* ---------- game init / restart (game_restart port) ---------- */
+function initGame() {
+  for (let k = 0; k < G.invH; k++) { G.inventory[k].fill(0); G.stack[k].fill(0); }
+  G.hp = 100; G.max_hp = 100; G.crew = 1; G.max_crew = 10; G.shipnum = 2; G.equip = [0, 0];
+  G.traded = 0; G.tradestock = 0; G.canTrade = 0; G.tradeItem = 0; G.mapMarked = false; G.invShow = false; G.equipShow = false; G.menuShow = false; G.mouseSelObj = 0;
+  item_add(5, 1); travelSave = null; gameOver = false; raidTimer = 45 * 30; lastCombatFrame = -9999;
+  loadRoom("rmTravel"); mode = "ship";
 }
-function render() {
-  ctx.clearRect(0, 0, W, H);
-  if (state === "title") drawTitle();
-  else if (state === "win") drawWin();
-  else if (level) drawLevel();
-  if (fade > 0) { ctx.fillStyle = "rgba(0,0,0," + fade + ")"; ctx.fillRect(0, 0, W, H); }
+
+/* ---------- self-test (?test=1) + screenshot setups (?shot=) ---------- */
+function runTests() {
+  const res = { rooms: {}, bands: {}, created0: CREATED };
+  for (const name of WORLD.roomOrder) {
+    loadRoom(name);
+    res.rooms[name] = { ents: ents.length, tiles: WORLD.rooms[name].tiles.length, player: !!player, vessel: !!vessel };
+  }
+  // foot movement + jump on rmExplore
+  loadRoom("rmExplore"); mode = "foot";
+  const x0 = player.x; keys.KeyD = true; for (let i = 0; i < 30; i++) stepAll();
+  keys.KeyD = false; res.walkDx = Math.round(player.x - x0);
+  pressed.Space = true; let jumped = false; for (let i = 0; i < 20; i++) { stepAll(); if (player.isInAir || player.vspd < 0) jumped = true; }
+  res.jumped = jumped;
+  // combat: crew auto-fire in rmTravel
+  loadRoom("rmTravel"); mode = "ship"; started = true; G.crew = 5; G.equip[0] = 5;
+  const bomber = create("objEnemyBomber", vessel.x + 100, vessel.y);
+  const c0 = CREATED; let crewShots = 0;
+  for (let i = 0; i < 600; i++) { const before = CREATED; stepAll(); for (let j = 0; j < CREATED - before; j++) {} crewShots = Math.max(crewShots, ents.filter(e => e.type === "objCrewBullet").length); }
+  res.crewBulletsSeen = crewShots; res.bomberHpAfter = Math.round(bomber.hp); res.bomberAlive = !bomber.dead;
+  // direct hit check: crew bullet overlapping a bomber damages it (collision port)
+  const b2 = create("objEnemyBomber", vessel.x + 300, vessel.y); const hp0 = b2.hp;
+  const cb = create("objCrewBullet", b2.x, b2.y); cb.vx = 0; cb.vy = 0; stepAll();
+  res.directHitDmg = hp0 - b2.hp;
+  // repair: crew>=2, out of combat, hp rises (obj_control alarm_0). Fresh travel
+  // room so the combat phase can't have docked the ship into foot mode.
+  loadRoom("rmTravel"); mode = "ship";
+  ents = ents.filter(e => e === vessel || e.type === "objBlock16"); // empty arena: ship + islands only
+  G.hp = 50; G.crew = 5; lastCombatFrame = -9999; healTimer = 1; // restaff: combat may have cost crew, and repair needs crew>=2
+  const pinX = vessel.x, pinY = vessel.y; // pin the ship at spawn so it can't cruise into a dock mid-test
+  for (let i = 0; i < 400; i++) { vessel.x = pinX; vessel.y = pinY; stepAll(); }
+  res.hpRepairedTo = G.hp;
+  res.bands = { travelTop: bandAt("rmTravel", 10).name, travelBottom: bandAt("rmTravel", 1240).name, explore: bandAt("rmExplore", 500).name, explore3: bandAt("rmExplore3", 500).name, explore4top: bandAt("rmExplore4", 10).name, garden: bandAt("rmGarden", 800).name, derelict: bandAt("rmDerelict", 100).name };
+  /* ---------- EXPANSION tests ---------- */
+  const exp = {};
+  loadRoom("rmGarden"); mode = "foot"; // new-item pickup: Skybloom patch
+  const patch = ents.find(e => e.type === "objSkybloomPatch");
+  const sb0 = item_amount(14); if (patch) interact(player, patch);
+  exp.skybloomPicked = item_amount(14) - sb0;
+  exp.gardenerLines = (WORLD.texts.obj_gardener || []).length;
+  loadRoom("rmDerelict"); mode = "foot"; // new-item pickup: Salvage
+  const salv = ents.find(e => e.type === "objSalvage");
+  const sv0 = item_amount(15); if (salv) interact(player, salv);
+  exp.salvagePicked = item_amount(15) - sv0;
+  exp.wreckPresent = ents.some(e => e.type === "objWreck");
+  loadRoom("rmExplore"); mode = "foot"; // harbormaster: full dialogue marks the chart
+  const hb = ents.find(e => e.type === "obj_harbormaster");
+  exp.harborLines = (WORLD.texts.obj_harbormaster || []).length;
+  let guard = 0; while (hb && !hb.dead && guard++ < 30) advanceSpeech(hb);
+  exp.mapMarked = !!G.mapMarked;
+  item_add(15, 2); item_add(14, 3); // trader table: salvage + skybloom sell for dubloons
+  const trader = create("obj_speechTrade", player.x, player.y);
+  const dub0 = item_amount(1);
+  G.trade = true; G.canTrade = 1; G.traded = 1; G.tradeItem = 15; G.tradestock = 2; completeTrade(trader);
+  exp.salvageDub = item_amount(1) - dub0;
+  G.traded = 1; G.tradeItem = 14; G.tradestock = 3; const dub1 = item_amount(1); completeTrade(trader);
+  exp.skybloomDub = item_amount(1) - dub1;
+  item_add(14, 5); // mayor's second chain: 5 Skybloom -> Double Cannon
+  const mayor = create("obj_mayorTrade", player.x, player.y);
+  G.traded = 1; G.tradeItem = 14; G.tradestock = 5; completeTrade(mayor);
+  exp.mayorChain = item_amount(11) >= 1 && item_amount(14) === 1;
+  travelSave = null; // fresh hub (the repair test filtered the saved travel ents)
+  loadRoom("rmTravel"); mode = "ship"; started = true; // new docks sail to the new isles
+  const d4 = ents.find(e => e.type === "objDock4");
+  if (d4 && vessel) { vessel.x = d4.x; vessel.y = d4.y; stepAll(); }
+  exp.dockGarden = roomName === "rmGarden";
+  loadRoom("rmTravel"); mode = "ship";
+  const d5 = ents.find(e => e.type === "objDock5");
+  if (d5 && vessel) { vessel.x = d5.x; vessel.y = d5.y; stepAll(); }
+  exp.dockDerelict = roomName === "rmDerelict";
+  res.expansion = exp;
+  res.pass = res.walkDx > 10 && res.jumped && res.crewBulletsSeen > 0 && res.directHitDmg > 0 && res.hpRepairedTo > 50 &&
+    res.bands.travelTop === "THIN AIR" && res.bands.travelBottom === "THICK AIR" &&
+    res.bands.garden === "THICK AIR" && res.bands.derelict === "THIN AIR" &&
+    res.rooms.rmGarden.ents > 100 && res.rooms.rmDerelict.ents > 80 &&
+    exp.skybloomPicked === 1 && exp.salvagePicked === 1 && exp.wreckPresent &&
+    exp.harborLines >= 6 && exp.gardenerLines >= 4 && exp.mapMarked &&
+    exp.salvageDub === 6 && exp.skybloomDub === 6 && exp.mayorChain &&
+    exp.dockGarden && exp.dockDerelict;
+  document.title = "TEST " + JSON.stringify(res);
+  loadRoom("rmTravel"); mode = "ship"; render();
+  return res;
 }
-function loop(ts) {
-  requestAnimationFrame(loop);
-  acc += Math.min(100, ts - last); last = ts;
-  while (acc >= 1000 / 60) { step(); acc -= 1000 / 60; }
+let CLOSEUP = false;
+function drawCloseup() { // EXPANSION proof scene: new art at exact integer zooms, smoothing off
+  ctx.fillStyle = "#20202c"; ctx.fillRect(0, 0, VW, VH);
+  drawText("NEW ART AT INTEGER ZOOM — 1:1 PIXELS, ORIGINAL PALETTE ONLY", 70, 34, "#fff", 14);
+  const figs = [["sprHarbormaster", "HARBORMASTER 24x48 @4x"], ["sprGardener", "GARDENER 24x48 @4x"], ["sprSkybloom", "SKYBLOOM 32x32 @4x"], ["sprSalvage", "SALVAGE 6x6 @8x"]];
+  figs.forEach(([n, label], i) => {
+    const img = sprImg(n, 0), x = 36 + i * 152, y = 64, s = n === "sprSalvage" ? 8 : 4;
+    if (img && img.complete) { ctx.imageSmoothingEnabled = false; ctx.drawImage(img, x, y, img.naturalWidth * s, img.naturalHeight * s); }
+    drawText(label, x, y + 200, "#ff8", 10);
+  });
+  [["spr_inventory_obj", 14, "ITEM 14 SKYBLOOM ICON 32x32 @4x"], ["spr_inventory_obj", 15, "ITEM 15 SALVAGE ICON 32x32 @4x"]].forEach(([n, idx, label], i) => {
+    const img = sprImg(n, idx), x = 120 + i * 220, y = 292;
+    if (img && img.complete) { ctx.imageSmoothingEnabled = false; ctx.drawImage(img, x, y, img.naturalWidth * 4, img.naturalHeight * 4); }
+    drawText(label, x - 24, y + 140, "#ff8", 10);
+  });
+}
+function setupShot(kind) {
+  started = true; initGame();
+  if (kind === "closeup") { CLOSEUP = true; return; }
+  if (kind === "garden") { gotoRoom("rmGarden"); mode = "foot"; if (player) player.x = 470; for (let i = 0; i < 30; i++) stepAll(); }
+  else if (kind === "derelict") { gotoRoom("rmDerelict"); mode = "foot"; if (player) { player.x = 730; player.y = 590; } for (let i = 0; i < 30; i++) stepAll(); }
+  else if (kind === "harbor") {
+    gotoRoom("rmExplore"); mode = "foot";
+    const hb = ents.find(e => e.type === "obj_harbormaster");
+    if (hb && player) { player.x = hb.x - 26; player.y = hb.y; hb.t = 1; focusCamera(true); }
+  }
+  else if (kind === "explore") { gotoRoom("rmExplore"); mode = "foot"; for (let i = 0; i < 30; i++) stepAll(); }
+  else if (kind === "combat") {
+    G.crew = 5; G.equip[0] = 5; G.hp = 62;
+    create("objEnemyBomber", vessel.x + 110, vessel.y - 10);
+    create("objSmlBoat", vessel.x + 90, vessel.y + 40);
+    for (let i = 0; i < 150; i++) stepAll();
+  } else { for (let i = 0; i < 30; i++) stepAll(); }
   render();
 }
-loadAssets(() => {
-  if (new URLSearchParams(location.search).has("probe")) {
-    document.title = JSON.stringify(runProbe());
-    return;
-  }
-  if (new URLSearchParams(location.search).has("test")) {
-    // oGame debug self-test: run the demo pilot synchronously and report state
-    state = "play"; loadLevel(0);
-    const nSteps = parseInt(new URLSearchParams(location.search).get("steps") || "10800", 10);
-    for (let i = 0; i < nSteps; i++) step();
+
+/* ---------- boot + main loop (30 steps/sec, room speed) ---------- */
+loadAssets();
+initGame();
+function imagesReady() {
+  for (const n in IMG) for (const im of IMG[n]) if (im && (!im.complete || !im.naturalWidth)) return false;
+  for (const n in BGIMG) { const im = BGIMG[n]; if (!im.complete || !im.naturalWidth) return false; }
+  return true;
+}
+if (TEST) { runTests(); }
+else {
+  let pendingShot = SHOT, acc = 0, last = performance.now();
+  function loop(now) {
+    acc += now - last; last = now;
+    if (pendingShot && imagesReady()) { // screenshots: wait for sprites, set the scene, then freeze it
+      if (pendingShot === "title") { started = false; }
+      else { setupShot(pendingShot); started = false; }
+      pendingShot = null;
+    }
+    const stepMs = 1000 / 30;
+    let n = 0;
+    while (acc >= stepMs && n < 5) { if (started && !gameOver) stepAll(); else for (const k in pressed) delete pressed[k]; acc -= stepMs; n++; }
     render();
-    document.title = JSON.stringify({ level: levelIdx, x: Math.round(player.x), y: Math.round(player.y),
-      deaths, shards: totalShards, state, onGround: player.onGround });
-    return;
+    requestAnimationFrame(loop);
   }
-  if (DEMO) { state = "play"; loadLevel(0); }
   requestAnimationFrame(loop);
-});
+}
